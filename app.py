@@ -2,14 +2,15 @@ import asyncio
 import re
 import sqlite3
 import os
+import threading
 from datetime import datetime
 from aiogram import Bot, Dispatcher, types
 from aiogram.contrib.middlewares.logging import LoggingMiddleware
 from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
-from aiogram.utils.executor import start_polling, start_webhook
-import threading
+from aiogram.utils.executor import start_polling
+from flask import Flask
 
 # ========== КОНФИГУРАЦИЯ ==========
 CLIENT_BOT_TOKEN = os.environ.get('CLIENT_BOT_TOKEN')
@@ -219,8 +220,8 @@ async def get_quantity(message: types.Message, state: FSMContext):
         )
         
         # Уведомление админу (через админ-бота)
-        admin_bot = Bot(token=ADMIN_BOT_TOKEN)
-        await admin_bot.send_message(
+        admin_bot_temp = Bot(token=ADMIN_BOT_TOKEN)
+        await admin_bot_temp.send_message(
             ADMIN_CHAT_ID,
             f"🆕 НОВЫЙ ЗАКАЗ #{order_id}!\n\n"
             f"👤 Клиент: {data['name']}\n"
@@ -228,6 +229,7 @@ async def get_quantity(message: types.Message, state: FSMContext):
             f"📦 Модель: {data['model_name']}\n"
             f"🔢 Количество: {quantity} шт."
         )
+        await admin_bot_temp.close()
         await state.finish()
     except ValueError:
         await message.answer("❌ Ошибка! Введите число.")
@@ -276,12 +278,13 @@ async def cash_confirm(callback_query: types.CallbackQuery):
         callback_query.message.message_id
     )
     
-    admin_bot = Bot(token=ADMIN_BOT_TOKEN)
-    await admin_bot.send_message(
+    admin_bot_temp = Bot(token=ADMIN_BOT_TOKEN)
+    await admin_bot_temp.send_message(
         ADMIN_CHAT_ID,
         f"💰 ЗАКАЗ #{order_id} ОПЛАЧЕН НАЛИЧНЫМИ!\n\n"
         f"👤 {order[2]}\n📱 {order[4]}\nСумма: {order[8]} руб."
     )
+    await admin_bot_temp.close()
     await callback_query.answer()
 
 @client_dp.callback_query_handler(lambda c: c.data.startswith('cash_cancel_'))
@@ -293,8 +296,9 @@ async def cash_cancel(callback_query: types.CallbackQuery):
         callback_query.message.chat.id,
         callback_query.message.message_id
     )
-    admin_bot = Bot(token=ADMIN_BOT_TOKEN)
-    await admin_bot.send_message(ADMIN_CHAT_ID, f"❌ Заказ #{order_id} отменён клиентом")
+    admin_bot_temp = Bot(token=ADMIN_BOT_TOKEN)
+    await admin_bot_temp.send_message(ADMIN_CHAT_ID, f"❌ Заказ #{order_id} отменён клиентом")
+    await admin_bot_temp.close()
     await callback_query.answer()
 
 # ========== АДМИНСКИЙ БОТ ==========
@@ -493,24 +497,36 @@ async def handle_price_input(message: types.Message):
             await message.answer("❌ Введите число!")
         del temp_price_order['order_id']
 
-# ========== ЗАПУСК ДВУХ БОТОВ ОДНОВРЕМЕННО ==========
+# ========== ВЕБ-СЕРВЕР ДЛЯ RENDER ==========
+flask_app = Flask(__name__)
+
+@flask_app.route('/')
+def health_check():
+    return "Бот работает! Клиентский и админский боты запущены."
+
+def run_web_server():
+    port = int(os.environ.get('PORT', 10000))
+    flask_app.run(host='0.0.0.0', port=port)
+
+# ========== ЗАПУСК ВСЕГО ==========
 def run_client_bot():
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
     start_polling(client_dp, skip_updates=True)
 
 def run_admin_bot():
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
     start_polling(admin_dp, skip_updates=True)
 
 if __name__ == '__main__':
     init_db()
     print("🤖 Запуск клиентского бота...")
     print("🤖 Запуск админского бота...")
+    print("🌐 Запуск веб-сервера для Render...")
+    
+    # Запускаем веб-сервер в отдельном потоке
+    web_thread = threading.Thread(target=run_web_server)
+    web_thread.daemon = True
+    web_thread.start()
     
     # Запускаем ботов в отдельных потоках
-    import threading
     client_thread = threading.Thread(target=run_client_bot)
     admin_thread = threading.Thread(target=run_admin_bot)
     
