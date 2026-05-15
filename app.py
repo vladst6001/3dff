@@ -499,36 +499,23 @@ def run_web_server():
     port = int(os.environ.get('PORT', 10000))
     flask_app.run(host='0.0.0.0', port=port)
 
-# ========== ЗАПУСК ВСЕГО ==========
-async def run_client_bot():
-    await client_dp.start_polling(client_bot)
-
-async def run_admin_bot():
-    await admin_dp.start_polling(admin_bot)
-
-def start_client():
-    asyncio.run(run_client_bot())
-
-def start_admin():
-    asyncio.run(run_admin_bot())
-
-if __name__ == '__main__':
-    init_db()
-    print("🤖 Запуск клиентского бота...")
-    print("🤖 Запуск админского бота...")
-    print("🌐 Запуск веб-сервера для Render...")
-    
-    # Запускаем веб-сервер в отдельном потоке
+# ========== ЗАПУСК ВСЕГО (ИСПРАВЛЕННЫЙ) ==========
+async def main():
+    # Запускаем Flask в отдельном потоке (это разрешено)
     web_thread = threading.Thread(target=run_web_server)
     web_thread.daemon = True
     web_thread.start()
     
-    # Запускаем ботов в отдельных потоках
-    client_thread = threading.Thread(target=start_client)
-    admin_thread = threading.Thread(target=start_admin)
+    print("🤖 Запуск клиентского бота...")
+    print("🤖 Запуск админского бота...")
+    print("🌐 Веб-сервер запущен в фоне")
     
-    client_thread.start()
-    admin_thread.start()
-    
-    client_thread.join()
-    admin_thread.join()
+    # Запускаем обоих ботов в главном асинхронном цикле
+    await asyncio.gather(
+        client_dp.start_polling(client_bot),
+        admin_dp.start_polling(admin_bot)
+    )
+
+if __name__ == '__main__':
+    init_db()
+    asyncio.run(main())
