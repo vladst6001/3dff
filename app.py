@@ -497,41 +497,49 @@ async def handle_price_input(message: types.Message):
             await message.answer("❌ Введите число!")
         del temp_price_order['order_id']
 
-# ========== ВЕБ-СЕРВЕР ДЛЯ RENDER ==========
+# ========== ВЕБ-СЕРВЕР ДЛЯ RENDER (ЗАПУСКАЕТСЯ В ГЛАВНОМ ПОТОКЕ) ==========
 flask_app = Flask(__name__)
 
 @flask_app.route('/')
 def health_check():
-    return "Бот работает! Клиентский и админский боты запущены."
+    return "✅ Боты работают! Клиентский и админский боты запущены."
 
 def run_web_server():
     port = int(os.environ.get('PORT', 10000))
-    flask_app.run(host='0.0.0.0', port=port)
+    # Запускаем Flask в режиме production с меньшим количеством логов
+    flask_app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
 
-# ========== ЗАПУСК ВСЕГО ==========
+# ========== ЗАПУСК БОТОВ В ФОНОВЫХ ПОТОКАХ ==========
 def run_client_bot():
+    """Запуск клиентского бота в отдельном цикле событий"""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     start_polling(client_dp, skip_updates=True)
 
 def run_admin_bot():
+    """Запуск админского бота в отдельном цикле событий"""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     start_polling(admin_dp, skip_updates=True)
 
 if __name__ == '__main__':
+    # Инициализируем базу данных
     init_db()
-    print("🤖 Запуск клиентского бота...")
-    print("🤖 Запуск админского бота...")
-    print("🌐 Запуск веб-сервера для Render...")
+    print("=" * 50)
+    print("🚀 ЗАПУСК БОТОВ")
+    print("=" * 50)
     
-    # Запускаем веб-сервер в отдельном потоке
-    web_thread = threading.Thread(target=run_web_server)
-    web_thread.daemon = True
-    web_thread.start()
-    
-    # Запускаем ботов в отдельных потоках
-    client_thread = threading.Thread(target=run_client_bot)
-    admin_thread = threading.Thread(target=run_admin_bot)
+    # Запускаем ботов в фоновых потоках
+    client_thread = threading.Thread(target=run_client_bot, daemon=True)
+    admin_thread = threading.Thread(target=run_admin_bot, daemon=True)
     
     client_thread.start()
     admin_thread.start()
     
-    client_thread.join()
-    admin_thread.join()
+    print("✅ Клиентский бот запущен в фоне")
+    print("✅ Админский бот запущен в фоне")
+    print("🌐 Запуск веб-сервера на порту 10000...")
+    print("=" * 50)
+    
+    # Запускаем веб-сервер в главном потоке (он будет держать процесс активным)
+    run_web_server()
