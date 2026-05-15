@@ -4,11 +4,11 @@ import sqlite3
 import os
 import threading
 from datetime import datetime
-from aiogram import Bot, Dispatcher, types
-from aiogram.contrib.middlewares.logging import LoggingMiddleware
-from aiogram.contrib.fsm_storage.memory import MemoryStorage
-from aiogram.dispatcher import FSMContext
-from aiogram.dispatcher.filters.state import State, StatesGroup
+from aiogram import Bot, Dispatcher, types, F
+from aiogram.filters import Command, StateFilter
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.utils.executor import start_polling
 from flask import Flask
@@ -126,8 +126,7 @@ def get_all_orders(status=None):
 # ========== КЛИЕНТСКИЙ БОТ ==========
 client_bot = Bot(token=CLIENT_BOT_TOKEN)
 client_storage = MemoryStorage()
-client_dp = Dispatcher(client_bot, storage=client_storage)
-client_dp.middleware.setup(LoggingMiddleware())
+client_dp = Dispatcher(storage=client_storage)
 
 class OrderForm(StatesGroup):
     waiting_for_name = State()
@@ -135,18 +134,20 @@ class OrderForm(StatesGroup):
     waiting_for_model_name = State()
     waiting_for_quantity = State()
 
-client_keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
-client_keyboard.add(KeyboardButton("🛒 Сделать заказ"))
-client_keyboard.add(KeyboardButton("📋 Мои заказы"))
+client_keyboard = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="🛒 Сделать заказ")],
+        [KeyboardButton(text="📋 Мои заказы")]
+    ],
+    resize_keyboard=True
+)
 
 def payment_cash_keyboard(order_id, total_price):
     buttons = [
-        InlineKeyboardButton(text="✅ Подтверждаю оплату наличными", callback_data=f"cash_confirm_{order_id}"),
-        InlineKeyboardButton(text="❌ Отмена заказа (нет денег)", callback_data=f"cash_cancel_{order_id}"),
+        [InlineKeyboardButton(text="✅ Подтверждаю оплату наличными", callback_data=f"cash_confirm_{order_id}")],
+        [InlineKeyboardButton(text="❌ Отмена заказа (нет денег)", callback_data=f"cash_cancel_{order_id}")],
     ]
-    keyboard_inline = InlineKeyboardMarkup(row_width=1)
-    keyboard_inline.add(*buttons)
-    return keyboard_inline
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def validate_belarus_phone(phone):
     phone_clean = re.sub(r'[\s\-\(\)]+', '', phone)
@@ -161,41 +162,38 @@ def validate_belarus_phone(phone):
         return phone_clean
     return None
 
-@client_dp.message_handler(commands=['start'])
+@client_dp.message(Command("start"))
 async def client_start(message: types.Message):
     await message.answer("🖨️ Добро пожаловать в сервис 3D-печати!\n\nВыберите действие:", reply_markup=client_keyboard)
 
-@client_dp.message_handler(lambda message: message.text == "🛒 Сделать заказ")
-async def make_order(message: types.Message):
-    await OrderForm.waiting_for_name.set()
+@client_dp.message(F.text == "🛒 Сделать заказ")
+async def make_order(message: types.Message, state: FSMContext):
+    await state.set_state(OrderForm.waiting_for_name)
     await message.answer("Введите ваше Имя и Фамилию:")
 
-@client_dp.message_handler(state=OrderForm.waiting_for_name)
+@client_dp.message(StateFilter(OrderForm.waiting_for_name))
 async def get_name(message: types.Message, state: FSMContext):
-    async with state.proxy() as data:
-        data['name'] = message.text
-    await OrderForm.next()
+    await state.update_data(name=message.text)
+    await state.set_state(OrderForm.waiting_for_phone)
     await message.answer("Введите номер телефона (белорусский):\nПример: +375291234567")
 
-@client_dp.message_handler(state=OrderForm.waiting_for_phone)
+@client_dp.message(StateFilter(OrderForm.waiting_for_phone))
 async def get_phone(message: types.Message, state: FSMContext):
     phone = validate_belarus_phone(message.text)
     if not phone:
         await message.answer("❌ Неверный формат! Пример: +375291234567")
         return
-    async with state.proxy() as data:
-        data['phone'] = phone
-    await OrderForm.next()
+    await state.update_data(phone=phone)
+    await state.set_state(OrderForm.waiting_for_model_name)
     await message.answer("Введите название модели:")
 
-@client_dp.message_handler(state=OrderForm.waiting_for_model_name)
+@client_dp.message(StateFilter(OrderForm.waiting_for_model_name))
 async def get_model(message: types.Message, state: FSMContext):
-    async with state.proxy() as data:
-        data['model_name'] = message.text
-    await OrderForm.next()
+    await state.update_data(model_name=message.text)
+    await state.set_state(OrderForm.waiting_for_quantity)
     await message.answer("Введите количество (цифрой):")
 
-@client_dp.message_handler(state=OrderForm.waiting_for_quantity)
+@client_dp.message(StateFilter(OrderForm.waiting_for_quantity))
 async def get_quantity(message: types.Message, state: FSMContext):
     try:
         quantity = int(message.text)
@@ -221,7 +219,6 @@ async def get_quantity(message: types.Message, state: FSMContext):
             reply_markup=client_keyboard
         )
         
-        # Уведомление админу (через админ-бота)
         admin_bot_temp = Bot(token=ADMIN_BOT_TOKEN)
         await admin_bot_temp.send_message(
             ADMIN_CHAT_ID,
@@ -231,12 +228,12 @@ async def get_quantity(message: types.Message, state: FSMContext):
             f"📦 Модель: {data['model_name']}\n"
             f"🔢 Количество: {quantity} шт."
         )
-        await admin_bot_temp.close()
-        await state.finish()
+        await admin_bot_temp.session.close()
+        await state.clear()
     except ValueError:
         await message.answer("❌ Ошибка! Введите число.")
 
-@client_dp.message_handler(lambda message: message.text == "📋 Мои заказы")
+@client_dp.message(F.text == "📋 Мои заказы")
 async def my_orders(message: types.Message):
     orders = get_orders_by_client(message.from_user.id)
     if not orders:
@@ -263,21 +260,19 @@ async def my_orders(message: types.Message):
     
     await message.answer(text, reply_markup=client_keyboard)
 
-@client_dp.callback_query_handler(lambda c: c.data.startswith('cash_confirm_'))
-async def cash_confirm(callback_query: types.CallbackQuery):
-    order_id = int(callback_query.data.split("_")[2])
+@client_dp.callback_query(F.data.startswith("cash_confirm_"))
+async def cash_confirm(callback: types.CallbackQuery):
+    order_id = int(callback.data.split("_")[2])
     order = get_order(order_id)
     
     update_payment(order_id, order[8], "полная")
     update_order_status(order_id, "оплачено наличными")
     
-    await client_bot.edit_message_text(
+    await callback.message.edit_text(
         f"✅ Заказ #{order_id}\n\n"
         f"Вы подтвердили оплату наличными.\n"
         f"Спасибо! Заказ передан в печать.\n\n"
-        f"Сумма: {order[8]} руб.",
-        callback_query.message.chat.id,
-        callback_query.message.message_id
+        f"Сумма: {order[8]} руб."
     )
     
     admin_bot_temp = Bot(token=ADMIN_BOT_TOKEN)
@@ -286,27 +281,22 @@ async def cash_confirm(callback_query: types.CallbackQuery):
         f"💰 ЗАКАЗ #{order_id} ОПЛАЧЕН НАЛИЧНЫМИ!\n\n"
         f"👤 {order[2]}\n📱 {order[4]}\nСумма: {order[8]} руб."
     )
-    await admin_bot_temp.close()
-    await callback_query.answer()
+    await admin_bot_temp.session.close()
+    await callback.answer()
 
-@client_dp.callback_query_handler(lambda c: c.data.startswith('cash_cancel_'))
-async def cash_cancel(callback_query: types.CallbackQuery):
-    order_id = int(callback_query.data.split("_")[2])
+@client_dp.callback_query(F.data.startswith("cash_cancel_"))
+async def cash_cancel(callback: types.CallbackQuery):
+    order_id = int(callback.data.split("_")[2])
     update_order_status(order_id, "отказ")
-    await client_bot.edit_message_text(
-        f"❌ Заказ #{order_id} отменён.",
-        callback_query.message.chat.id,
-        callback_query.message.message_id
-    )
+    await callback.message.edit_text(f"❌ Заказ #{order_id} отменён.")
     admin_bot_temp = Bot(token=ADMIN_BOT_TOKEN)
     await admin_bot_temp.send_message(ADMIN_CHAT_ID, f"❌ Заказ #{order_id} отменён клиентом")
-    await admin_bot_temp.close()
-    await callback_query.answer()
+    await admin_bot_temp.session.close()
+    await callback.answer()
 
 # ========== АДМИНСКИЙ БОТ ==========
 admin_bot = Bot(token=ADMIN_BOT_TOKEN)
-admin_dp = Dispatcher(admin_bot)
-admin_dp.middleware.setup(LoggingMiddleware())
+admin_dp = Dispatcher()
 
 def admin_main_menu():
     buttons = [
@@ -337,14 +327,14 @@ def admin_status_menu(order_id):
 
 temp_price_order = {}
 
-@admin_dp.message_handler(commands=['start'])
+@admin_dp.message(Command("start"))
 async def admin_start(message: types.Message):
     if message.from_user.id != ADMIN_CHAT_ID:
         await message.answer("❌ Доступ запрещён")
         return
     await message.answer("👋 Панель администратора 3D-печати", reply_markup=admin_main_menu())
 
-@admin_dp.callback_query_handler(lambda c: c.data == "admin_new_orders")
+@admin_dp.callback_query(F.data == "admin_new_orders")
 async def admin_new_orders(callback: types.CallbackQuery):
     if callback.from_user.id != ADMIN_CHAT_ID:
         await callback.answer("❌ Доступ запрещён")
@@ -359,7 +349,7 @@ async def admin_new_orders(callback: types.CallbackQuery):
         await callback.message.answer(text, reply_markup=admin_order_actions(order[0]))
     await callback.answer()
 
-@admin_dp.callback_query_handler(lambda c: c.data == "admin_all_orders")
+@admin_dp.callback_query(F.data == "admin_all_orders")
 async def admin_all_orders(callback: types.CallbackQuery):
     if callback.from_user.id != ADMIN_CHAT_ID:
         await callback.answer("❌ Доступ запрещён")
@@ -375,7 +365,7 @@ async def admin_all_orders(callback: types.CallbackQuery):
     await callback.message.edit_text(text, reply_markup=admin_main_menu())
     await callback.answer()
 
-@admin_dp.callback_query_handler(lambda c: c.data == "admin_active_orders")
+@admin_dp.callback_query(F.data == "admin_active_orders")
 async def admin_active_orders(callback: types.CallbackQuery):
     if callback.from_user.id != ADMIN_CHAT_ID:
         await callback.answer("❌ Доступ запрещён")
@@ -393,7 +383,7 @@ async def admin_active_orders(callback: types.CallbackQuery):
         await callback.message.answer(text, reply_markup=admin_order_actions(order[0]))
     await callback.answer()
 
-@admin_dp.callback_query_handler(lambda c: c.data.startswith("admin_accept_"))
+@admin_dp.callback_query(F.data.startswith("admin_accept_"))
 async def admin_accept(callback: types.CallbackQuery):
     if callback.from_user.id != ADMIN_CHAT_ID:
         await callback.answer("❌ Доступ запрещён")
@@ -405,7 +395,7 @@ async def admin_accept(callback: types.CallbackQuery):
     await callback.message.edit_text(f"✅ Заказ #{order_id} принят", reply_markup=admin_order_actions(order_id))
     await callback.answer()
 
-@admin_dp.callback_query_handler(lambda c: c.data.startswith("admin_reject_"))
+@admin_dp.callback_query(F.data.startswith("admin_reject_"))
 async def admin_reject(callback: types.CallbackQuery):
     if callback.from_user.id != ADMIN_CHAT_ID:
         await callback.answer("❌ Доступ запрещён")
@@ -417,7 +407,7 @@ async def admin_reject(callback: types.CallbackQuery):
     await callback.message.edit_text(f"❌ Заказ #{order_id} отклонён", reply_markup=admin_main_menu())
     await callback.answer()
 
-@admin_dp.callback_query_handler(lambda c: c.data.startswith("admin_price_"))
+@admin_dp.callback_query(F.data.startswith("admin_price_"))
 async def admin_price(callback: types.CallbackQuery):
     if callback.from_user.id != ADMIN_CHAT_ID:
         await callback.answer("❌ Доступ запрещён")
@@ -427,7 +417,7 @@ async def admin_price(callback: types.CallbackQuery):
     await callback.message.answer(f"💰 Введите цену для заказа #{order_id} (за 1 шт.):\nПример: 500")
     await callback.answer()
 
-@admin_dp.callback_query_handler(lambda c: c.data.startswith("admin_status_menu_"))
+@admin_dp.callback_query(F.data.startswith("admin_status_menu_"))
 async def admin_status_menu(callback: types.CallbackQuery):
     if callback.from_user.id != ADMIN_CHAT_ID:
         await callback.answer("❌ Доступ запрещён")
@@ -436,7 +426,7 @@ async def admin_status_menu(callback: types.CallbackQuery):
     await callback.message.edit_text(f"📊 Выберите статус для заказа #{order_id}:", reply_markup=admin_status_menu(order_id))
     await callback.answer()
 
-@admin_dp.callback_query_handler(lambda c: c.data.startswith("admin_status_"))
+@admin_dp.callback_query(F.data.startswith("admin_status_"))
 async def admin_status_change(callback: types.CallbackQuery):
     if callback.from_user.id != ADMIN_CHAT_ID:
         await callback.answer("❌ Доступ запрещён")
@@ -462,7 +452,7 @@ async def admin_status_change(callback: types.CallbackQuery):
     await callback.message.edit_text(f"✅ Заказ #{order_id} → {new_status}", reply_markup=admin_order_actions(order_id))
     await callback.answer()
 
-@admin_dp.callback_query_handler(lambda c: c.data.startswith("admin_back_"))
+@admin_dp.callback_query(F.data.startswith("admin_back_"))
 async def admin_back(callback: types.CallbackQuery):
     if callback.from_user.id != ADMIN_CHAT_ID:
         await callback.answer("❌ Доступ запрещён")
@@ -471,7 +461,7 @@ async def admin_back(callback: types.CallbackQuery):
     await callback.message.edit_text(f"🔙 Заказ #{order_id}", reply_markup=admin_order_actions(order_id))
     await callback.answer()
 
-@admin_dp.message_handler(content_types=['text'], chat_id=ADMIN_CHAT_ID)
+@admin_dp.message(F.text, F.chat.id == ADMIN_CHAT_ID)
 async def handle_price_input(message: types.Message):
     if 'order_id' in temp_price_order:
         order_id = temp_price_order['order_id']
@@ -511,11 +501,17 @@ def run_web_server():
     flask_app.run(host='0.0.0.0', port=port)
 
 # ========== ЗАПУСК ВСЕГО ==========
-def run_client_bot():
-    start_polling(client_dp, skip_updates=True)
+async def run_client_bot():
+    await client_dp.start_polling(client_bot)
 
-def run_admin_bot():
-    start_polling(admin_dp, skip_updates=True)
+async def run_admin_bot():
+    await admin_dp.start_polling(admin_bot)
+
+def start_client():
+    asyncio.run(run_client_bot())
+
+def start_admin():
+    asyncio.run(run_admin_bot())
 
 if __name__ == '__main__':
     init_db()
@@ -529,8 +525,8 @@ if __name__ == '__main__':
     web_thread.start()
     
     # Запускаем ботов в отдельных потоках
-    client_thread = threading.Thread(target=run_client_bot)
-    admin_thread = threading.Thread(target=run_admin_bot)
+    client_thread = threading.Thread(target=start_client)
+    admin_thread = threading.Thread(target=start_admin)
     
     client_thread.start()
     admin_thread.start()
