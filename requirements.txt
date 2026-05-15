@@ -1,2 +1,2 @@
 aiogram==2.25.1
-Flask
+Flask==2.3.3
