@@ -172,14 +172,14 @@ async def make_order(message: types.Message):
     await message.answer("Введите ваше Имя и Фамилию:")
 
 @dp.message_handler(state=OrderForm.waiting_for_name)
-async def get_name(message: types.Message, state: FSMContext):
+async def process_name(message: types.Message, state: FSMContext):
     async with state.proxy() as data:
         data['name'] = message.text
     await OrderForm.next()
-    await message.answer("Введите номер телефона (белорусский):\nПример: +375291234567")
+    await message.answer("📱 Введите номер телефона (в формате +375XXXXXXXXX):")
 
 @dp.message_handler(state=OrderForm.waiting_for_phone)
-async def get_phone(message: types.Message, state: FSMContext):
+async def process_phone(message: types.Message, state: FSMContext):
     phone = validate_belarus_phone(message.text)
     if not phone:
         await message.answer("❌ Неверный формат! Пример: +375291234567")
@@ -190,14 +190,14 @@ async def get_phone(message: types.Message, state: FSMContext):
     await message.answer("Введите название модели:")
 
 @dp.message_handler(state=OrderForm.waiting_for_model_name)
-async def get_model(message: types.Message, state: FSMContext):
+async def process_model(message: types.Message, state: FSMContext):
     async with state.proxy() as data:
         data['model_name'] = message.text
     await OrderForm.next()
     await message.answer("Введите количество (цифрой):")
 
 @dp.message_handler(state=OrderForm.waiting_for_quantity)
-async def get_quantity(message: types.Message, state: FSMContext):
+async def process_quantity(message: types.Message, state: FSMContext):
     try:
         quantity = int(message.text)
         if quantity < 1:
