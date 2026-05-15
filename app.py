@@ -6,6 +6,7 @@ import threading
 from datetime import datetime
 from aiogram import Bot, Dispatcher, types
 from aiogram.contrib.middlewares.logging import LoggingMiddleware
+from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
@@ -124,7 +125,8 @@ def get_all_orders(status=None):
 
 # ========== КЛИЕНТСКИЙ БОТ ==========
 client_bot = Bot(token=CLIENT_BOT_TOKEN)
-client_dp = Dispatcher(client_bot)
+client_storage = MemoryStorage()
+client_dp = Dispatcher(client_bot, storage=client_storage)
 client_dp.middleware.setup(LoggingMiddleware())
 
 class OrderForm(StatesGroup):
@@ -497,49 +499,41 @@ async def handle_price_input(message: types.Message):
             await message.answer("❌ Введите число!")
         del temp_price_order['order_id']
 
-# ========== ВЕБ-СЕРВЕР ДЛЯ RENDER (ЗАПУСКАЕТСЯ В ГЛАВНОМ ПОТОКЕ) ==========
+# ========== ВЕБ-СЕРВЕР ДЛЯ RENDER ==========
 flask_app = Flask(__name__)
 
 @flask_app.route('/')
 def health_check():
-    return "✅ Боты работают! Клиентский и админский боты запущены."
+    return "Бот работает! Клиентский и админский боты запущены."
 
 def run_web_server():
     port = int(os.environ.get('PORT', 10000))
-    # Запускаем Flask в режиме production с меньшим количеством логов
-    flask_app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+    flask_app.run(host='0.0.0.0', port=port)
 
-# ========== ЗАПУСК БОТОВ В ФОНОВЫХ ПОТОКАХ ==========
+# ========== ЗАПУСК ВСЕГО ==========
 def run_client_bot():
-    """Запуск клиентского бота в отдельном цикле событий"""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
     start_polling(client_dp, skip_updates=True)
 
 def run_admin_bot():
-    """Запуск админского бота в отдельном цикле событий"""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
     start_polling(admin_dp, skip_updates=True)
 
 if __name__ == '__main__':
-    # Инициализируем базу данных
     init_db()
-    print("=" * 50)
-    print("🚀 ЗАПУСК БОТОВ")
-    print("=" * 50)
+    print("🤖 Запуск клиентского бота...")
+    print("🤖 Запуск админского бота...")
+    print("🌐 Запуск веб-сервера для Render...")
     
-    # Запускаем ботов в фоновых потоках
-    client_thread = threading.Thread(target=run_client_bot, daemon=True)
-    admin_thread = threading.Thread(target=run_admin_bot, daemon=True)
+    # Запускаем веб-сервер в отдельном потоке
+    web_thread = threading.Thread(target=run_web_server)
+    web_thread.daemon = True
+    web_thread.start()
+    
+    # Запускаем ботов в отдельных потоках
+    client_thread = threading.Thread(target=run_client_bot)
+    admin_thread = threading.Thread(target=run_admin_bot)
     
     client_thread.start()
     admin_thread.start()
     
-    print("✅ Клиентский бот запущен в фоне")
-    print("✅ Админский бот запущен в фоне")
-    print("🌐 Запуск веб-сервера на порту 10000...")
-    print("=" * 50)
-    
-    # Запускаем веб-сервер в главном потоке (он будет держать процесс активным)
-    run_web_server()
+    client_thread.join()
+    admin_thread.join()
