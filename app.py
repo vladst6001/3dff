@@ -317,20 +317,31 @@ def admin_main_menu():
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def admin_order_actions(order_id):
-    buttons = [
-        [InlineKeyboardButton(text="🟢 Принять", callback_data=f"admin_accept_{order_id}")],
-        [InlineKeyboardButton(text="🔴 Отказать", callback_data=f"admin_reject_{order_id}")],
-        [InlineKeyboardButton(text="💰 Цена", callback_data=f"admin_price_{order_id}")],
-        [InlineKeyboardButton(text="📊 Статус", callback_data=f"admin_status_menu_{order_id}")],
-    ]
+    order = get_order(order_id)
+    status = order[9]
+    
+    # Если заказ уже принят или в работе — не показываем кнопки "Принять" и "Отказать"
+    if status not in ["новый", "отказ"]:
+        buttons = [
+            [InlineKeyboardButton(text="💰 Цена", callback_data=f"admin_price_{order_id}")],
+            [InlineKeyboardButton(text="📊 Статус", callback_data=f"admin_status_menu_{order_id}")],
+        ]
+    else:
+        buttons = [
+            [InlineKeyboardButton(text="🟢 Принять", callback_data=f"admin_accept_{order_id}")],
+            [InlineKeyboardButton(text="🔴 Отказать", callback_data=f"admin_reject_{order_id}")],
+            [InlineKeyboardButton(text="💰 Цена", callback_data=f"admin_price_{order_id}")],
+            [InlineKeyboardButton(text="📊 Статус", callback_data=f"admin_status_menu_{order_id}")],
+        ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def admin_status_menu(order_id):
     buttons = [
-        [InlineKeyboardButton(text="🟠 Подготовка модели", callback_data=f"admin_status_{order_id}_подготовка модели")],
-        [InlineKeyboardButton(text="🔧 Подготовка принтера", callback_data=f"admin_status_{order_id}_подготовка принтера")],
-        [InlineKeyboardButton(text="🖨️ Печать", callback_data=f"admin_status_{order_id}_печать")],
-        [InlineKeyboardButton(text="🎉 Готово", callback_data=f"admin_status_{order_id}_готова")],
+        [InlineKeyboardButton(text="🟠 Подготовка модели", callback_data=f"admin_status_change_{order_id}_подготовка модели")],
+        [InlineKeyboardButton(text="🔧 Подготовка принтера", callback_data=f"admin_status_change_{order_id}_подготовка принтера")],
+        [InlineKeyboardButton(text="🖨️ Печать", callback_data=f"admin_status_change_{order_id}_печать")],
+        [InlineKeyboardButton(text="🎉 Готово", callback_data=f"admin_status_change_{order_id}_готова")],
+        [InlineKeyboardButton(text="🔴 Отказать", callback_data=f"admin_status_change_{order_id}_отказ")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data=f"admin_back_{order_id}")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -401,11 +412,7 @@ async def admin_accept(call: types.CallbackQuery):
     order_id = int(call.data.split('_')[2])
     update_order_status(order_id, "принят")
     order = get_order(order_id)
-    
-    temp_bot = Bot(token=CLIENT_BOT_TOKEN)
-    await temp_bot.send_message(order[1], f"🟢 Ваш заказ #{order_id} ПРИНЯТ в работу!")
-    await temp_bot.close()
-    
+    await client_bot.send_message(order[1], f"🟢 Ваш заказ #{order_id} ПРИНЯТ в работу!")
     await call.message.edit_text(f"✅ Заказ #{order_id} принят", reply_markup=admin_order_actions(order_id))
     await call.answer("✅ Заказ принят")
 
@@ -417,11 +424,7 @@ async def admin_reject(call: types.CallbackQuery):
     order_id = int(call.data.split('_')[2])
     update_order_status(order_id, "отказ")
     order = get_order(order_id)
-    
-    temp_bot = Bot(token=CLIENT_BOT_TOKEN)
-    await temp_bot.send_message(order[1], f"🔴 Ваш заказ #{order_id} ОТКЛОНЁН")
-    await temp_bot.close()
-    
+    await client_bot.send_message(order[1], f"🔴 Ваш заказ #{order_id} ОТКЛОНЁН")
     await call.message.edit_text(f"❌ Заказ #{order_id} отклонён", reply_markup=admin_main_menu())
     await call.answer("❌ Заказ отклонён")
 
@@ -444,22 +447,21 @@ async def admin_status_menu(call: types.CallbackQuery):
     await call.message.edit_text(f"📊 Выберите статус для заказа #{order_id}:", reply_markup=admin_status_menu(order_id))
     await call.answer()
 
-@admin_dp.callback_query_handler(lambda c: c.data.startswith('admin_status_') and not c.data.startswith('admin_status_menu_'))
+@admin_dp.callback_query_handler(lambda c: c.data.startswith('admin_status_change_'))
 async def admin_status_change(call: types.CallbackQuery):
     if call.from_user.id != ADMIN_CHAT_ID:
         await call.answer("❌ Доступ запрещён")
         return
     parts = call.data.split('_')
-    order_id = int(parts[2])
-    new_status = parts[3]
+    order_id = int(parts[3])
+    new_status = parts[4]
+    
     update_order_status(order_id, new_status)
     order = get_order(order_id)
-    
-    temp_bot = Bot(token=CLIENT_BOT_TOKEN)
-    await temp_bot.send_message(order[1], f"🔄 Статус вашего заказа #{order_id}: {new_status}")
+    await client_bot.send_message(order[1], f"🔄 Статус вашего заказа #{order_id}: {new_status}")
     
     if new_status == "подготовка модели":
-        await temp_bot.send_message(
+        await client_bot.send_message(
             order[1],
             f"🟠 ЗАКАЗ #{order_id} ГОТОВ К ОПЛАТЕ\n\n"
             f"📦 Модель: {order[5]}\n🔢 {order[6]} шт.\n"
@@ -468,7 +470,6 @@ async def admin_status_change(call: types.CallbackQuery):
             f"✅ При готовности оплатить - нажмите кнопку ниже",
             reply_markup=payment_cash_keyboard(order_id, order[8])
         )
-    await temp_bot.close()
     
     await call.message.edit_text(f"✅ Заказ #{order_id} → {new_status}", reply_markup=admin_order_actions(order_id))
     await call.answer(f"✅ Статус изменён на {new_status}")
@@ -496,9 +497,7 @@ async def handle_price_input(message: types.Message):
             set_order_price(order_id, price)
             update_order_status(order_id, "цена выставлена")
             total = price * order[6]
-            
-            temp_bot = Bot(token=CLIENT_BOT_TOKEN)
-            await temp_bot.send_message(
+            await client_bot.send_message(
                 order[1],
                 f"💵 МЕНЕДЖЕР ВЫСТАВИЛ СТОИМОСТЬ\n\n"
                 f"📦 Заказ #{order_id}\n"
@@ -507,7 +506,6 @@ async def handle_price_input(message: types.Message):
                 f"💵 Цена за шт.: {price} руб.\n"
                 f"💲 ИТОГО: {total} руб."
             )
-            await temp_bot.close()
             await message.answer(f"✅ Цена {price} руб. для заказа #{order_id}\n💲 Итого: {total} руб.")
         except ValueError:
             await message.answer("❌ Введите число!")
