@@ -510,11 +510,20 @@ def run_web_server():
     port = int(os.environ.get('PORT', 10000))
     flask_app.run(host='0.0.0.0', port=port)
 
+# ========== ЗАПУСК ВСЕГО ==========
 def run_client_bot():
-    start_polling(client_dp, skip_updates=True)
+    # Создаем новый цикл событий для этого потока
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    # Запускаем поллинг с этим циклом
+    start_polling(client_dp, skip_updates=True, loop=loop)
 
 def run_admin_bot():
-    start_polling(admin_dp, skip_updates=True)
+    # Создаем новый цикл событий для этого потока
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    # Запускаем поллинг с этим циклом
+    start_polling(admin_dp, skip_updates=True, loop=loop)
 
 if __name__ == '__main__':
     init_db()
