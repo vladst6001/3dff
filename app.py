@@ -303,7 +303,7 @@ async def cash_cancel(callback_query: types.CallbackQuery):
     await admin_bot_temp.close()
     await callback_query.answer()
 
-# ========== АДМИНСКИЙ БОТ (ТОЛЬКО КНОПКИ) ==========
+# ========== АДМИНСКИЙ БОТ ==========
 admin_bot = Bot(token=ADMIN_BOT_TOKEN)
 admin_dp = Dispatcher(admin_bot)
 admin_dp.middleware.setup(LoggingMiddleware())
@@ -345,103 +345,103 @@ async def admin_start(message: types.Message):
     await message.answer("👋 Панель администратора 3D-печати", reply_markup=admin_main_menu())
 
 @admin_dp.callback_query_handler(lambda c: c.data == "admin_new_orders")
-async def admin_new_orders(callback_query: types.CallbackQuery):
-    if callback_query.from_user.id != ADMIN_CHAT_ID:
-        await callback_query.answer("❌ Доступ запрещён")
+async def admin_new_orders(call: types.CallbackQuery):
+    if call.from_user.id != ADMIN_CHAT_ID:
+        await call.answer("❌ Доступ запрещён")
         return
     orders = get_all_orders(status="новый")
     if not orders:
-        await callback_query.message.edit_text("🟡 Новых заказов нет", reply_markup=admin_main_menu())
-        await callback_query.answer()
+        await call.message.edit_text("🟡 Новых заказов нет", reply_markup=admin_main_menu())
+        await call.answer()
         return
     for order in orders:
         text = f"🆕 ЗАКАЗ #{order[0]}\n\n👤 {order[2]}\n📱 {order[4]}\n📦 {order[5]}\n🔢 {order[6]} шт."
-        await callback_query.message.answer(text, reply_markup=admin_order_actions(order[0]))
-    await callback_query.answer()
+        await call.message.answer(text, reply_markup=admin_order_actions(order[0]))
+    await call.answer()
 
 @admin_dp.callback_query_handler(lambda c: c.data == "admin_all_orders")
-async def admin_all_orders(callback_query: types.CallbackQuery):
-    if callback_query.from_user.id != ADMIN_CHAT_ID:
-        await callback_query.answer("❌ Доступ запрещён")
+async def admin_all_orders(call: types.CallbackQuery):
+    if call.from_user.id != ADMIN_CHAT_ID:
+        await call.answer("❌ Доступ запрещён")
         return
     orders = get_all_orders()
     if not orders:
-        await callback_query.message.edit_text("📭 Заказов нет", reply_markup=admin_main_menu())
-        await callback_query.answer()
+        await call.message.edit_text("📭 Заказов нет", reply_markup=admin_main_menu())
+        await call.answer()
         return
     text = "📋 ВСЕ ЗАКАЗЫ:\n\n"
     for order in orders[:20]:
         text += f"#{order[0]} | {order[2]} | {order[5]} | {order[9]} | {order[8]} руб.\n"
-    await callback_query.message.edit_text(text, reply_markup=admin_main_menu())
-    await callback_query.answer()
+    await call.message.edit_text(text, reply_markup=admin_main_menu())
+    await call.answer()
 
 @admin_dp.callback_query_handler(lambda c: c.data == "admin_active_orders")
-async def admin_active_orders(callback_query: types.CallbackQuery):
-    if callback_query.from_user.id != ADMIN_CHAT_ID:
-        await callback_query.answer("❌ Доступ запрещён")
+async def admin_active_orders(call: types.CallbackQuery):
+    if call.from_user.id != ADMIN_CHAT_ID:
+        await call.answer("❌ Доступ запрещён")
         return
     statuses = ["принят", "цена выставлена", "подготовка модели", "ожидает оплаты наличными", "оплачено наличными", "подготовка принтера", "печать"]
     active = []
     for s in statuses:
         active.extend(get_all_orders(status=s))
     if not active:
-        await callback_query.message.edit_text("🟡 Нет активных заказов", reply_markup=admin_main_menu())
-        await callback_query.answer()
+        await call.message.edit_text("🟡 Нет активных заказов", reply_markup=admin_main_menu())
+        await call.answer()
         return
     for order in active:
         text = f"🔄 ЗАКАЗ #{order[0]}\n\n👤 {order[2]}\n📦 {order[5]}\n📍 {order[9]}\n💰 {order[8]} руб."
-        await callback_query.message.answer(text, reply_markup=admin_order_actions(order[0]))
-    await callback_query.answer()
+        await call.message.answer(text, reply_markup=admin_order_actions(order[0]))
+    await call.answer()
 
 @admin_dp.callback_query_handler(lambda c: c.data.startswith('admin_accept_'))
-async def admin_accept(callback_query: types.CallbackQuery):
-    if callback_query.from_user.id != ADMIN_CHAT_ID:
-        await callback_query.answer("❌ Доступ запрещён")
+async def admin_accept(call: types.CallbackQuery):
+    if call.from_user.id != ADMIN_CHAT_ID:
+        await call.answer("❌ Доступ запрещён")
         return
-    order_id = int(callback_query.data.split('_')[2])
+    order_id = int(call.data.split('_')[2])
     update_order_status(order_id, "принят")
     order = get_order(order_id)
     await client_bot.send_message(order[1], f"🟢 Ваш заказ #{order_id} ПРИНЯТ в работу!")
-    await callback_query.message.edit_text(f"✅ Заказ #{order_id} принят", reply_markup=admin_order_actions(order_id))
-    await callback_query.answer("Заказ принят")
+    await call.message.edit_text(f"✅ Заказ #{order_id} принят", reply_markup=admin_order_actions(order_id))
+    await call.answer("✅ Заказ принят")
 
 @admin_dp.callback_query_handler(lambda c: c.data.startswith('admin_reject_'))
-async def admin_reject(callback_query: types.CallbackQuery):
-    if callback_query.from_user.id != ADMIN_CHAT_ID:
-        await callback_query.answer("❌ Доступ запрещён")
+async def admin_reject(call: types.CallbackQuery):
+    if call.from_user.id != ADMIN_CHAT_ID:
+        await call.answer("❌ Доступ запрещён")
         return
-    order_id = int(callback_query.data.split('_')[2])
+    order_id = int(call.data.split('_')[2])
     update_order_status(order_id, "отказ")
     order = get_order(order_id)
     await client_bot.send_message(order[1], f"🔴 Ваш заказ #{order_id} ОТКЛОНЁН")
-    await callback_query.message.edit_text(f"❌ Заказ #{order_id} отклонён", reply_markup=admin_main_menu())
-    await callback_query.answer("Заказ отклонён")
+    await call.message.edit_text(f"❌ Заказ #{order_id} отклонён", reply_markup=admin_main_menu())
+    await call.answer("❌ Заказ отклонён")
 
 @admin_dp.callback_query_handler(lambda c: c.data.startswith('admin_price_'))
-async def admin_price(callback_query: types.CallbackQuery):
-    if callback_query.from_user.id != ADMIN_CHAT_ID:
-        await callback_query.answer("❌ Доступ запрещён")
+async def admin_price(call: types.CallbackQuery):
+    if call.from_user.id != ADMIN_CHAT_ID:
+        await call.answer("❌ Доступ запрещён")
         return
-    order_id = int(callback_query.data.split('_')[2])
+    order_id = int(call.data.split('_')[2])
     temp_price_order['order_id'] = order_id
-    await callback_query.message.answer(f"💰 Введите цену для заказа #{order_id} (за 1 шт.):\nПример: 500")
-    await callback_query.answer()
+    await call.message.answer(f"💰 Введите цену для заказа #{order_id} (за 1 шт.):\nПример: 500")
+    await call.answer()
 
 @admin_dp.callback_query_handler(lambda c: c.data.startswith('admin_status_menu_'))
-async def admin_status_menu(callback_query: types.CallbackQuery):
-    if callback_query.from_user.id != ADMIN_CHAT_ID:
-        await callback_query.answer("❌ Доступ запрещён")
+async def admin_status_menu(call: types.CallbackQuery):
+    if call.from_user.id != ADMIN_CHAT_ID:
+        await call.answer("❌ Доступ запрещён")
         return
-    order_id = int(callback_query.data.split('_')[3])
-    await callback_query.message.edit_text(f"📊 Выберите статус для заказа #{order_id}:", reply_markup=admin_status_menu(order_id))
-    await callback_query.answer()
+    order_id = int(call.data.split('_')[3])
+    await call.message.edit_text(f"📊 Выберите статус для заказа #{order_id}:", reply_markup=admin_status_menu(order_id))
+    await call.answer()
 
 @admin_dp.callback_query_handler(lambda c: c.data.startswith('admin_status_') and not c.data.startswith('admin_status_menu_'))
-async def admin_status_change(callback_query: types.CallbackQuery):
-    if callback_query.from_user.id != ADMIN_CHAT_ID:
-        await callback_query.answer("❌ Доступ запрещён")
+async def admin_status_change(call: types.CallbackQuery):
+    if call.from_user.id != ADMIN_CHAT_ID:
+        await call.answer("❌ Доступ запрещён")
         return
-    parts = callback_query.data.split('_')
+    parts = call.data.split('_')
     order_id = int(parts[2])
     new_status = parts[3]
     update_order_status(order_id, new_status)
@@ -459,17 +459,17 @@ async def admin_status_change(callback_query: types.CallbackQuery):
             reply_markup=payment_cash_keyboard(order_id, order[8])
         )
     
-    await callback_query.message.edit_text(f"✅ Заказ #{order_id} → {new_status}", reply_markup=admin_order_actions(order_id))
-    await callback_query.answer(f"Статус изменён на {new_status}")
+    await call.message.edit_text(f"✅ Заказ #{order_id} → {new_status}", reply_markup=admin_order_actions(order_id))
+    await call.answer(f"✅ Статус изменён на {new_status}")
 
 @admin_dp.callback_query_handler(lambda c: c.data.startswith('admin_back_'))
-async def admin_back(callback_query: types.CallbackQuery):
-    if callback_query.from_user.id != ADMIN_CHAT_ID:
-        await callback_query.answer("❌ Доступ запрещён")
+async def admin_back(call: types.CallbackQuery):
+    if call.from_user.id != ADMIN_CHAT_ID:
+        await call.answer("❌ Доступ запрещён")
         return
-    order_id = int(callback_query.data.split('_')[2])
-    await callback_query.message.edit_text(f"🔙 Заказ #{order_id}", reply_markup=admin_order_actions(order_id))
-    await callback_query.answer()
+    order_id = int(call.data.split('_')[2])
+    await call.message.edit_text(f"🔙 Заказ #{order_id}", reply_markup=admin_order_actions(order_id))
+    await call.answer()
 
 @admin_dp.message_handler(content_types=['text'], chat_id=ADMIN_CHAT_ID)
 async def handle_price_input(message: types.Message):
@@ -498,7 +498,6 @@ async def handle_price_input(message: types.Message):
         except ValueError:
             await message.answer("❌ Введите число!")
         del temp_price_order['order_id']
-
 # ========== ВЕБ-СЕРВЕР ДЛЯ RENDER ==========
 flask_app = Flask(__name__)
 
