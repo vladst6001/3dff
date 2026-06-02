@@ -87,6 +87,7 @@ def update_order_status(order_id, status):
     ''', (status, datetime.now().isoformat(), order_id))
     conn.commit()
     conn.close()
+    print(f"DEBUG: Заказ {order_id} обновлён на статус '{status}'")
 
 def get_order(order_id):
     conn = sqlite3.connect(DB_NAME)
@@ -264,20 +265,18 @@ async def my_orders(message: types.Message):
     await message.answer(text, reply_markup=client_keyboard)
 
 @client_dp.callback_query_handler(lambda c: c.data.startswith('cash_confirm_'))
-async def cash_confirm(callback_query: types.CallbackQuery):
-    order_id = int(callback_query.data.split("_")[2])
+async def cash_confirm(call: types.CallbackQuery):
+    order_id = int(call.data.split("_")[2])
     order = get_order(order_id)
     
     update_payment(order_id, order[8], "полная")
     update_order_status(order_id, "оплачено наличными")
     
-    await client_bot.edit_message_text(
+    await call.message.edit_text(
         f"✅ Заказ #{order_id}\n\n"
         f"Вы подтвердили оплату наличными.\n"
         f"Спасибо! Заказ передан в печать.\n\n"
-        f"Сумма: {order[8]} руб.",
-        callback_query.message.chat.id,
-        callback_query.message.message_id
+        f"Сумма: {order[8]} руб."
     )
     
     admin_bot_temp = Bot(token=ADMIN_BOT_TOKEN)
@@ -287,21 +286,17 @@ async def cash_confirm(callback_query: types.CallbackQuery):
         f"👤 {order[2]}\n📱 {order[4]}\nСумма: {order[8]} руб."
     )
     await admin_bot_temp.close()
-    await callback_query.answer()
+    await call.answer()
 
 @client_dp.callback_query_handler(lambda c: c.data.startswith('cash_cancel_'))
-async def cash_cancel(callback_query: types.CallbackQuery):
-    order_id = int(callback_query.data.split("_")[2])
+async def cash_cancel(call: types.CallbackQuery):
+    order_id = int(call.data.split("_")[2])
     update_order_status(order_id, "отказ")
-    await client_bot.edit_message_text(
-        f"❌ Заказ #{order_id} отменён.",
-        callback_query.message.chat.id,
-        callback_query.message.message_id
-    )
+    await call.message.edit_text(f"❌ Заказ #{order_id} отменён.")
     admin_bot_temp = Bot(token=ADMIN_BOT_TOKEN)
     await admin_bot_temp.send_message(ADMIN_CHAT_ID, f"❌ Заказ #{order_id} отменён клиентом")
     await admin_bot_temp.close()
-    await callback_query.answer()
+    await call.answer()
 
 # ========== АДМИНСКИЙ БОТ ==========
 admin_bot = Bot(token=ADMIN_BOT_TOKEN)
@@ -316,7 +311,6 @@ def admin_main_menu():
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-# Кнопки для нового заказа (только принять/отказать)
 def admin_new_order_actions(order_id):
     buttons = [
         [InlineKeyboardButton(text="🟢 Принять", callback_data=f"admin_accept_{order_id}")],
@@ -324,7 +318,6 @@ def admin_new_order_actions(order_id):
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-# Кнопки после принятия заказа (статус и цена)
 def admin_accepted_order_actions(order_id):
     buttons = [
         [InlineKeyboardButton(text="📊 Статус", callback_data=f"admin_status_menu_{order_id}")],
@@ -332,11 +325,10 @@ def admin_accepted_order_actions(order_id):
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-# Меню выбора статуса
 def admin_status_menu_keyboard(order_id):
     buttons = [
-        [InlineKeyboardButton(text="🟠 Подготовка модели", callback_data=f"admin_status_change_{order_id}_подготовка_модели")],
-        [InlineKeyboardButton(text="🔧 Подготовка принтера", callback_data=f"admin_status_change_{order_id}_подготовка_принтера")],
+        [InlineKeyboardButton(text="🟠 Подготовка модели", callback_data=f"admin_status_change_{order_id}_подготовка модели")],
+        [InlineKeyboardButton(text="🔧 Подготовка принтера", callback_data=f"admin_status_change_{order_id}_подготовка принтера")],
         [InlineKeyboardButton(text="🖨️ Печать", callback_data=f"admin_status_change_{order_id}_печать")],
         [InlineKeyboardButton(text="🎉 Готово", callback_data=f"admin_status_change_{order_id}_готова")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data=f"admin_back_{order_id}")],
@@ -388,7 +380,7 @@ async def admin_active_orders(call: types.CallbackQuery):
     if call.from_user.id != ADMIN_CHAT_ID:
         await call.answer("❌ Доступ запрещён")
         return
-    statuses = ["принят", "цена выставлена", "подготовка_модели", "ожидает оплаты наличными", "оплачено наличными", "подготовка_принтера", "печать"]
+    statuses = ["принят", "цена выставлена", "подготовка модели", "ожидает оплаты наличными", "оплачено наличными", "подготовка принтера", "печать"]
     active = []
     for s in statuses:
         active.extend(get_all_orders(status=s))
@@ -409,7 +401,10 @@ async def admin_accept(call: types.CallbackQuery):
     order_id = int(call.data.split('_')[2])
     update_order_status(order_id, "принят")
     order = get_order(order_id)
+    
+    # Отправляем уведомление клиенту
     await client_bot.send_message(order[1], f"🟢 Ваш заказ #{order_id} ПРИНЯТ в работу!")
+    
     await call.message.edit_text(f"✅ Заказ #{order_id} принят", reply_markup=admin_accepted_order_actions(order_id))
     await call.answer("✅ Заказ принят")
 
@@ -421,7 +416,10 @@ async def admin_reject(call: types.CallbackQuery):
     order_id = int(call.data.split('_')[2])
     update_order_status(order_id, "отказ")
     order = get_order(order_id)
+    
+    # Отправляем уведомление клиенту
     await client_bot.send_message(order[1], f"🔴 Ваш заказ #{order_id} ОТКЛОНЁН")
+    
     await call.message.edit_text(f"❌ Заказ #{order_id} отклонён")
     await call.answer("❌ Заказ отклонён")
 
@@ -451,10 +449,12 @@ async def admin_status_change(call: types.CallbackQuery):
         return
     parts = call.data.split('_')
     order_id = int(parts[3])
-    new_status = parts[4].replace('_', ' ')
+    new_status = parts[4]
     
     update_order_status(order_id, new_status)
     order = get_order(order_id)
+    
+    # Отправляем уведомление клиенту
     await client_bot.send_message(order[1], f"🔄 Статус вашего заказа #{order_id}: {new_status}")
     
     if new_status == "подготовка модели":
@@ -507,6 +507,7 @@ async def handle_price_input(message: types.Message):
         except ValueError:
             await message.answer("❌ Введите число!")
         del temp_price_order['order_id']
+
 # ========== ВЕБ-СЕРВЕР ДЛЯ RENDER ==========
 flask_app = Flask(__name__)
 
@@ -518,20 +519,11 @@ def run_web_server():
     port = int(os.environ.get('PORT', 10000))
     flask_app.run(host='0.0.0.0', port=port)
 
-# ========== ЗАПУСК ВСЕГО ==========
 def run_client_bot():
-    # Создаем новый цикл событий для этого потока
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    # Запускаем поллинг с этим циклом
-    start_polling(client_dp, skip_updates=True, loop=loop)
+    start_polling(client_dp, skip_updates=True)
 
 def run_admin_bot():
-    # Создаем новый цикл событий для этого потока
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    # Запускаем поллинг с этим циклом
-    start_polling(admin_dp, skip_updates=True, loop=loop)
+    start_polling(admin_dp, skip_updates=True)
 
 if __name__ == '__main__':
     init_db()
