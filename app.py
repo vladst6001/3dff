@@ -317,22 +317,13 @@ def admin_main_menu():
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def admin_order_actions(order_id):
-    order = get_order(order_id)
-    status = order[9]
-    
-    # Если заказ уже принят или в работе — не показываем кнопки "Принять" и "Отказать"
-    if status not in ["новый", "отказ"]:
-        buttons = [
-            [InlineKeyboardButton(text="💰 Цена", callback_data=f"admin_price_{order_id}")],
-            [InlineKeyboardButton(text="📊 Статус", callback_data=f"admin_status_menu_{order_id}")],
-        ]
-    else:
-        buttons = [
-            [InlineKeyboardButton(text="🟢 Принять", callback_data=f"admin_accept_{order_id}")],
-            [InlineKeyboardButton(text="🔴 Отказать", callback_data=f"admin_reject_{order_id}")],
-            [InlineKeyboardButton(text="💰 Цена", callback_data=f"admin_price_{order_id}")],
-            [InlineKeyboardButton(text="📊 Статус", callback_data=f"admin_status_menu_{order_id}")],
-        ]
+    # Все кнопки всегда видны
+    buttons = [
+        [InlineKeyboardButton(text="🟢 Принять", callback_data=f"admin_accept_{order_id}")],
+        [InlineKeyboardButton(text="🔴 Отказать", callback_data=f"admin_reject_{order_id}")],
+        [InlineKeyboardButton(text="💰 Цена", callback_data=f"admin_price_{order_id}")],
+        [InlineKeyboardButton(text="📊 Статус", callback_data=f"admin_status_menu_{order_id}")],
+    ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def admin_status_menu(order_id):
@@ -391,7 +382,7 @@ async def admin_active_orders(call: types.CallbackQuery):
     if call.from_user.id != ADMIN_CHAT_ID:
         await call.answer("❌ Доступ запрещён")
         return
-    statuses = ["принят", "цена выставлена", "подготовка модели", "ожидает оплаты наличными", "оплачено наличными", "подготовка принтера", "печать"]
+    statuses = ["новый", "принят", "цена выставлена", "подготовка модели", "ожидает оплаты наличными", "оплачено наличными", "подготовка принтера", "печать"]
     active = []
     for s in statuses:
         active.extend(get_all_orders(status=s))
@@ -490,8 +481,8 @@ async def handle_price_input(message: types.Message):
         try:
             price = float(message.text.strip())
             order = get_order(order_id)
-            if order[9] != "принят":
-                await message.answer(f"⚠️ Заказ #{order_id} в статусе '{order[9]}'. Сначала примите заказ.")
+            if order[9] == "отказ":
+                await message.answer(f"⚠️ Заказ #{order_id} отклонён. Нельзя выставить цену.")
                 del temp_price_order['order_id']
                 return
             set_order_price(order_id, price)
