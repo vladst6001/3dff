@@ -49,10 +49,14 @@ def init_db():
     conn.commit()
     conn.close()
 
+def get_current_time():
+    """Возвращает текущее время в Минске в формате ISO"""
+    return datetime.now(MINSK_TZ).isoformat(timespec='seconds')
+
 def create_order(client_id, client_name, client_username, phone, model_name, quantity, image_url=None):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    now = datetime.now(MINSK_TZ).isoformat()
+    now = get_current_time()
     cursor.execute('''
         INSERT INTO orders (client_id, client_name, client_username, phone, model_name, quantity, image_url, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -70,7 +74,7 @@ def set_order_price(order_id, price_per_unit):
     total_price = quantity * price_per_unit
     cursor.execute('''
         UPDATE orders SET price_per_unit = ?, total_price = ?, updated_at = ? WHERE id = ?
-    ''', (price_per_unit, total_price, datetime.now(MINSK_TZ).isoformat(), order_id))
+    ''', (price_per_unit, total_price, get_current_time(), order_id))
     conn.commit()
     conn.close()
 
@@ -79,7 +83,7 @@ def update_order_status(order_id, status):
     cursor = conn.cursor()
     cursor.execute('''
         UPDATE orders SET status = ?, updated_at = ? WHERE id = ?
-    ''', (status, datetime.now(MINSK_TZ).isoformat(), order_id))
+    ''', (status, get_current_time(), order_id))
     conn.commit()
     conn.close()
     print(f"✅ Заказ {order_id} → статус '{status}'")
@@ -349,7 +353,7 @@ def webapp_order_file():
         )
     asyncio.run(notify())
     
-    return jsonify({'ok': True, 'order_id': order_id})
+    return jsonify({'ok': True, 'order_id': order_id, 'created_at': get_current_time()})
 
 @flask_app.route('/webapp_orders', methods=['POST'])
 def webapp_orders():
@@ -364,7 +368,7 @@ def webapp_orders():
             'quantity': order[6],
             'total_price': order[8],
             'status': order[9],
-            'created_at': order[10]
+            'created_at': order[10] if order[10] else get_current_time()
         })
     return jsonify({'orders': result})
 
@@ -392,7 +396,7 @@ def admin_orders():
             'quantity': order[6],
             'total_price': order[8],
             'status': order[9],
-            'created_at': order[10]
+            'created_at': order[10] if order[10] else get_current_time()
         })
     return jsonify({'orders': result})
 
