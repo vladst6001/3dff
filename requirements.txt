@@ -1,2 +1,3 @@
-from flask_cors import CORS
-CORS(flask_app)
+aiogram==2.25.1
+Flask
+flask-cors
