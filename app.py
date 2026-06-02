@@ -4,6 +4,7 @@ import os
 import re
 from datetime import datetime
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 from aiogram import Bot, Dispatcher, types
 from aiogram.contrib.middlewares.logging import LoggingMiddleware
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
@@ -316,6 +317,7 @@ async def admin_status_order(message: types.Message):
 
 # ========== FLASK ДЛЯ MINI APP ==========
 flask_app = Flask(__name__)
+CORS(flask_app)  # ← РАЗРЕШАЕМ ЗАПРОСЫ С ЛЮБЫХ САЙТОВ
 
 @flask_app.route('/webapp_order_file', methods=['POST'])
 def webapp_order_file():
