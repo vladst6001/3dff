@@ -50,7 +50,7 @@ def init_db():
     conn.close()
 
 def get_current_time():
-    """Возвращает текущее время в Минске в формате ISO"""
+    """Возвращает текущее время в Минске в формате ISO без микросекунд"""
     return datetime.now(MINSK_TZ).isoformat(timespec='seconds')
 
 def create_order(client_id, client_name, client_username, phone, model_name, quantity, image_url=None):
@@ -114,6 +114,45 @@ def get_all_orders(status=None):
     orders = cursor.fetchall()
     conn.close()
     return orders
+
+# ========== ФУНКЦИЯ ДЛЯ ИСПРАВЛЕНИЯ ДАТ В СТАРЫХ ЗАКАЗАХ ==========
+def fix_dates_in_database():
+    """Исправляет пустые, неправильные или нулевые даты в заказах"""
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        
+        # Проверяем, есть ли таблица orders
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='orders';")
+        if not cursor.fetchone():
+            print("Таблица orders не найдена")
+            conn.close()
+            return
+        
+        # Находим заказы с проблемными датами (NULL, пустые или 1970 год)
+        cursor.execute("""
+            SELECT id, created_at FROM orders 
+            WHERE created_at IS NULL 
+               OR created_at = '' 
+               OR created_at LIKE '1970%'
+               OR created_at = 'None'
+        """)
+        bad_orders = cursor.fetchall()
+        
+        if bad_orders:
+            print(f"🔧 Найдено заказов с проблемами даты: {len(bad_orders)}")
+            for order in bad_orders:
+                current_time = get_current_time()
+                cursor.execute("UPDATE orders SET created_at = ? WHERE id = ?;", (current_time, order[0]))
+                print(f"   Заказ #{order[0]}: дата исправлена на {current_time}")
+            conn.commit()
+            print("✅ Даты в заказах исправлены!")
+        else:
+            print("✅ Проблем с датами не найдено.")
+        
+        conn.close()
+    except Exception as e:
+        print(f"⚠️ Ошибка при исправлении дат: {e}")
 
 # ========== КЛИЕНТСКИЙ БОТ ==========
 client_bot = Bot(token=CLIENT_BOT_TOKEN)
@@ -362,13 +401,17 @@ def webapp_orders():
     orders = get_orders_by_client(user_id)
     result = []
     for order in orders:
+        created_at = order[10]
+        # Если дата неправильная, показываем текущее время
+        if not created_at or created_at == '' or created_at.startswith('1970') or created_at == 'None':
+            created_at = get_current_time()
         result.append({
             'id': order[0],
             'model_name': order[5],
             'quantity': order[6],
             'total_price': order[8],
             'status': order[9],
-            'created_at': order[10] if order[10] else get_current_time()
+            'created_at': created_at
         })
     return jsonify({'orders': result})
 
@@ -388,6 +431,9 @@ def admin_orders():
     
     result = []
     for order in orders:
+        created_at = order[10]
+        if not created_at or created_at == '' or created_at.startswith('1970') or created_at == 'None':
+            created_at = get_current_time()
         result.append({
             'id': order[0],
             'client_name': order[2],
@@ -396,7 +442,7 @@ def admin_orders():
             'quantity': order[6],
             'total_price': order[8],
             'status': order[9],
-            'created_at': order[10] if order[10] else get_current_time()
+            'created_at': created_at
         })
     return jsonify({'orders': result})
 
@@ -477,6 +523,7 @@ def run_bot(dp):
 
 if __name__ == '__main__':
     init_db()
+    fix_dates_in_database()  # ← ИСПРАВЛЯЕМ ДАТЫ ПРИ ЗАПУСКЕ
     print("🤖 Запуск клиентского бота...")
     print("🤖 Запуск админских команд...")
     print("🌐 Запуск веб-сервера...")
