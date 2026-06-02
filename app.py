@@ -87,7 +87,6 @@ def update_order_status(order_id, status):
     ''', (status, datetime.now().isoformat(), order_id))
     conn.commit()
     conn.close()
-    print(f"DEBUG: Заказ {order_id} обновлён на статус '{status}'")
 
 def get_order(order_id):
     conn = sqlite3.connect(DB_NAME)
@@ -519,11 +518,12 @@ def run_web_server():
     port = int(os.environ.get('PORT', 10000))
     flask_app.run(host='0.0.0.0', port=port)
 
-def run_client_bot():
-    start_polling(client_dp, skip_updates=True)
-
-def run_admin_bot():
-    start_polling(admin_dp, skip_updates=True)
+# ========== ИСПРАВЛЕННЫЙ ЗАПУСК БОТОВ ==========
+def run_bot(dp):
+    """Запускает бота в отдельном потоке с собственным событийным циклом."""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    start_polling(dp, skip_updates=True)
 
 if __name__ == '__main__':
     init_db()
@@ -535,8 +535,8 @@ if __name__ == '__main__':
     web_thread.daemon = True
     web_thread.start()
     
-    client_thread = threading.Thread(target=run_client_bot)
-    admin_thread = threading.Thread(target=run_admin_bot)
+    client_thread = threading.Thread(target=run_bot, args=(client_dp,))
+    admin_thread = threading.Thread(target=run_bot, args=(admin_dp,))
     
     client_thread.start()
     admin_thread.start()
