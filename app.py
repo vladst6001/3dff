@@ -2,7 +2,7 @@ import asyncio
 import sqlite3
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from aiogram import Bot, Dispatcher, types
@@ -18,6 +18,9 @@ import threading
 CLIENT_BOT_TOKEN = os.environ.get('CLIENT_BOT_TOKEN')
 ADMIN_BOT_TOKEN = os.environ.get('ADMIN_BOT_TOKEN')
 ADMIN_CHAT_ID = int(os.environ.get('ADMIN_CHAT_ID', 0))
+
+# Часовой пояс Минска (UTC+3)
+MINSK_TZ = timezone(timedelta(hours=3))
 
 # ========== БАЗА ДАННЫХ ==========
 DB_NAME = "orders.db"
@@ -49,7 +52,7 @@ def init_db():
 def create_order(client_id, client_name, client_username, phone, model_name, quantity, image_url=None):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    now = datetime.now().isoformat()
+    now = datetime.now(MINSK_TZ).isoformat()
     cursor.execute('''
         INSERT INTO orders (client_id, client_name, client_username, phone, model_name, quantity, image_url, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -67,7 +70,7 @@ def set_order_price(order_id, price_per_unit):
     total_price = quantity * price_per_unit
     cursor.execute('''
         UPDATE orders SET price_per_unit = ?, total_price = ?, updated_at = ? WHERE id = ?
-    ''', (price_per_unit, total_price, datetime.now().isoformat(), order_id))
+    ''', (price_per_unit, total_price, datetime.now(MINSK_TZ).isoformat(), order_id))
     conn.commit()
     conn.close()
 
@@ -76,7 +79,7 @@ def update_order_status(order_id, status):
     cursor = conn.cursor()
     cursor.execute('''
         UPDATE orders SET status = ?, updated_at = ? WHERE id = ?
-    ''', (status, datetime.now().isoformat(), order_id))
+    ''', (status, datetime.now(MINSK_TZ).isoformat(), order_id))
     conn.commit()
     conn.close()
     print(f"✅ Заказ {order_id} → статус '{status}'")
@@ -317,7 +320,7 @@ async def admin_status_order(message: types.Message):
 
 # ========== FLASK ДЛЯ MINI APP ==========
 flask_app = Flask(__name__)
-CORS(flask_app)  # ← РАЗРЕШАЕМ ЗАПРОСЫ С ЛЮБЫХ САЙТОВ
+CORS(flask_app)
 
 @flask_app.route('/webapp_order_file', methods=['POST'])
 def webapp_order_file():
