@@ -64,7 +64,8 @@ def init_db():
     print("✅ База данных инициализирована")
 
 def get_current_time():
-    return datetime.now(MINSK_TZ).isoformat(timespec='seconds')
+    """Возвращает текущее время в Минске в формате YYYY-MM-DD HH:MM:SS"""
+    return datetime.now(MINSK_TZ).strftime('%Y-%m-%d %H:%M:%S')
 
 def create_order(client_id, client_name, client_username, phone, model_name, quantity, image_url=None):
     conn = sqlite3.connect(DB_NAME)
@@ -152,33 +153,6 @@ def get_user_profile(user_id):
     if row:
         return {'name': row[0], 'phone': row[1], 'avatar_url': row[2]}
     return None
-
-# ========== ФУНКЦИЯ ДЛЯ ИСПРАВЛЕНИЯ ДАТ ==========
-def fix_dates_in_database():
-    try:
-        conn = sqlite3.connect(DB_NAME)
-        cursor = conn.cursor()
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='orders';")
-        if not cursor.fetchone():
-            conn.close()
-            return
-        cursor.execute("""
-            UPDATE orders 
-            SET created_at = ? 
-            WHERE created_at IS NULL 
-               OR created_at = '' 
-               OR created_at LIKE '1970%'
-               OR created_at = 'None'
-        """, (get_current_time(),))
-        rows_affected = cursor.rowcount
-        conn.commit()
-        conn.close()
-        if rows_affected > 0:
-            print(f"🔧 Исправлено дат в заказах: {rows_affected}")
-        else:
-            print("✅ Проблем с датами не найдено")
-    except Exception as e:
-        print(f"⚠️ Ошибка при исправлении дат: {e}")
 
 # ========== КЛИЕНТСКИЙ БОТ ==========
 client_bot = Bot(token=CLIENT_BOT_TOKEN)
@@ -623,7 +597,6 @@ def run_bot(dp):
 
 if __name__ == '__main__':
     init_db()
-    fix_dates_in_database()
     print("🤖 Запуск клиентского бота...")
     print("🤖 Запуск админских команд...")
     print("🌐 Запуск веб-сервера...")
