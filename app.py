@@ -61,6 +61,7 @@ def init_db():
     ''')
     conn.commit()
     conn.close()
+    print("✅ База данных инициализирована")
 
 def get_current_time():
     return datetime.now(MINSK_TZ).isoformat(timespec='seconds')
@@ -69,6 +70,7 @@ def create_order(client_id, client_name, client_username, phone, model_name, qua
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     now = get_current_time()
+    print(f"📝 Создание заказа: клиент={client_id}, время={now}")
     cursor.execute('''
         INSERT INTO orders (client_id, client_name, client_username, phone, model_name, quantity, image_url, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -76,6 +78,7 @@ def create_order(client_id, client_name, client_username, phone, model_name, qua
     order_id = cursor.lastrowid
     conn.commit()
     conn.close()
+    print(f"✅ Заказ {order_id} создан, дата={now}")
     return order_id
 
 def set_order_price(order_id, price_per_unit):
@@ -138,6 +141,7 @@ def save_user_profile(user_id, name, phone, avatar_url=None):
     ''', (user_id, name, phone, avatar_url, now))
     conn.commit()
     conn.close()
+    print(f"✅ Профиль пользователя {user_id} сохранён")
 
 def get_user_profile(user_id):
     conn = sqlite3.connect(DB_NAME)
@@ -171,6 +175,8 @@ def fix_dates_in_database():
         conn.close()
         if rows_affected > 0:
             print(f"🔧 Исправлено дат в заказах: {rows_affected}")
+        else:
+            print("✅ Проблем с датами не найдено")
     except Exception as e:
         print(f"⚠️ Ошибка при исправлении дат: {e}")
 
@@ -412,17 +418,28 @@ def upload_avatar():
     
     avatar_url = f"/avatars/{filename}"
     
-    # Сохраняем в базу
+    # Получаем существующий профиль
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     now = get_current_time()
+    
+    cursor.execute("SELECT name, phone FROM user_profiles WHERE user_id = ?", (user_id,))
+    existing = cursor.fetchone()
+    
+    if existing:
+        name, phone = existing
+    else:
+        name = None
+        phone = None
+    
     cursor.execute('''
         INSERT OR REPLACE INTO user_profiles (user_id, name, phone, avatar_url, updated_at)
         VALUES (?, ?, ?, ?, ?)
-    ''', (user_id, userProfile.get('name'), userProfile.get('phone'), avatar_url, now))
+    ''', (user_id, name, phone, avatar_url, now))
     conn.commit()
     conn.close()
     
+    print(f"✅ Аватар сохранён для пользователя {user_id}")
     return jsonify({'ok': True, 'avatar_url': avatar_url})
 
 @flask_app.route('/get_profile', methods=['POST'])
@@ -430,6 +447,7 @@ def get_profile():
     data = request.json
     user_id = data.get('user_id')
     profile = get_user_profile(user_id)
+    print(f"📦 Запрос профиля для {user_id}: {profile}")
     if profile:
         return jsonify({'ok': True, 'profile': profile})
     return jsonify({'ok': True, 'profile': None})
@@ -476,10 +494,15 @@ def webapp_order_file():
 def webapp_orders():
     data = request.json
     user_id = data.get('user_id')
+    print(f"📦 Запрос заказов для user_id: {user_id}")
+    
     orders = get_orders_by_client(user_id)
+    print(f"📦 Найдено заказов: {len(orders)}")
+    
     result = []
     for order in orders:
         created_at = order[10]
+        print(f"   Заказ {order[0]}: created_at = {created_at}")
         if not created_at or created_at == '':
             created_at = 'Дата не указана'
         result.append({
