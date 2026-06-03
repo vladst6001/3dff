@@ -4,6 +4,7 @@ import os
 import re
 import base64
 import uuid
+import time
 from datetime import datetime, timezone, timedelta
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
@@ -20,9 +21,6 @@ import threading
 CLIENT_BOT_TOKEN = os.environ.get('CLIENT_BOT_TOKEN')
 ADMIN_BOT_TOKEN = os.environ.get('ADMIN_BOT_TOKEN')
 ADMIN_CHAT_ID = int(os.environ.get('ADMIN_CHAT_ID', 0))
-
-# Часовой пояс Минска (UTC+3)
-MINSK_TZ = timezone(timedelta(hours=3))
 
 # ========== БАЗА ДАННЫХ ==========
 DB_NAME = "orders.db"
@@ -65,7 +63,7 @@ def init_db():
 
 def get_current_time():
     """Возвращает текущее время в Минске в формате YYYY-MM-DD HH:MM:SS"""
-    return datetime.now(MINSK_TZ).strftime('%Y-%m-%d %H:%M:%S')
+    return time.strftime('%Y-%m-%d %H:%M:%S')
 
 def create_order(client_id, client_name, client_username, phone, model_name, quantity, image_url=None):
     conn = sqlite3.connect(DB_NAME)
@@ -478,7 +476,9 @@ def webapp_orders():
         created_at = order[10]
         print(f"   Заказ {order[0]}: created_at = {created_at}")
         if not created_at or created_at == '':
-            created_at = 'Дата не указана'
+            # Если даты нет, ставим текущую
+            created_at = get_current_time()
+            print(f"   ⚠️ Дата отсутствовала, установлена текущая: {created_at}")
         result.append({
             'id': order[0],
             'model_name': order[5],
