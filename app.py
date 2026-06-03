@@ -2,8 +2,10 @@ import asyncio
 import sqlite3
 import os
 import re
+import base64
+import uuid
 from datetime import datetime, timezone, timedelta
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from aiogram import Bot, Dispatcher, types
 from aiogram.contrib.middlewares.logging import LoggingMiddleware
@@ -28,6 +30,7 @@ DB_NAME = "orders.db"
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
+    # Таблица заказов
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS orders (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -46,11 +49,20 @@ def init_db():
             updated_at TEXT
         )
     ''')
+    # Таблица профилей пользователей
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS user_profiles (
+            user_id INTEGER PRIMARY KEY,
+            name TEXT,
+            phone TEXT,
+            avatar_url TEXT,
+            updated_at TEXT
+        )
+    ''')
     conn.commit()
     conn.close()
 
 def get_current_time():
-    """Возвращает текущее время в Минске в формате ISO без микросекунд"""
     return datetime.now(MINSK_TZ).isoformat(timespec='seconds')
 
 def create_order(client_id, client_name, client_username, phone, model_name, quantity, image_url=None):
@@ -115,42 +127,50 @@ def get_all_orders(status=None):
     conn.close()
     return orders
 
-# ========== ФУНКЦИЯ ДЛЯ ИСПРАВЛЕНИЯ ДАТ В СТАРЫХ ЗАКАЗАХ ==========
+# ========== РАБОТА С ПРОФИЛЯМИ ==========
+def save_user_profile(user_id, name, phone, avatar_url=None):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    now = get_current_time()
+    cursor.execute('''
+        INSERT OR REPLACE INTO user_profiles (user_id, name, phone, avatar_url, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+    ''', (user_id, name, phone, avatar_url, now))
+    conn.commit()
+    conn.close()
+
+def get_user_profile(user_id):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute('SELECT name, phone, avatar_url FROM user_profiles WHERE user_id = ?', (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        return {'name': row[0], 'phone': row[1], 'avatar_url': row[2]}
+    return None
+
+# ========== ФУНКЦИЯ ДЛЯ ИСПРАВЛЕНИЯ ДАТ ==========
 def fix_dates_in_database():
-    """Исправляет пустые, неправильные или нулевые даты в заказах"""
     try:
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
-        
-        # Проверяем, есть ли таблица orders
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='orders';")
         if not cursor.fetchone():
-            print("Таблица orders не найдена")
             conn.close()
             return
-        
-        # Находим заказы с проблемными датами (NULL, пустые или 1970 год)
         cursor.execute("""
-            SELECT id, created_at FROM orders 
+            UPDATE orders 
+            SET created_at = ? 
             WHERE created_at IS NULL 
                OR created_at = '' 
                OR created_at LIKE '1970%'
                OR created_at = 'None'
-        """)
-        bad_orders = cursor.fetchall()
-        
-        if bad_orders:
-            print(f"🔧 Найдено заказов с проблемами даты: {len(bad_orders)}")
-            for order in bad_orders:
-                current_time = get_current_time()
-                cursor.execute("UPDATE orders SET created_at = ? WHERE id = ?;", (current_time, order[0]))
-                print(f"   Заказ #{order[0]}: дата исправлена на {current_time}")
-            conn.commit()
-            print("✅ Даты в заказах исправлены!")
-        else:
-            print("✅ Проблем с датами не найдено.")
-        
+        """, (get_current_time(),))
+        rows_affected = cursor.rowcount
+        conn.commit()
         conn.close()
+        if rows_affected > 0:
+            print(f"🔧 Исправлено дат в заказах: {rows_affected}")
     except Exception as e:
         print(f"⚠️ Ошибка при исправлении дат: {e}")
 
@@ -273,7 +293,7 @@ async def my_orders(message: types.Message):
     
     await message.answer(text, parse_mode="MarkdownV2")
 
-# ========== АДМИНСКИЕ КОМАНДЫ (ПИСЬМЕННАЯ ВЕРСИЯ) ==========
+# ========== АДМИНСКИЕ КОМАНДЫ ==========
 admin_bot = Bot(token=ADMIN_BOT_TOKEN)
 
 @client_dp.message_handler(commands=['admin_orders'], chat_id=ADMIN_CHAT_ID)
@@ -365,6 +385,64 @@ async def admin_status_order(message: types.Message):
 flask_app = Flask(__name__)
 CORS(flask_app)
 
+# Создаём папку для аватаров
+os.makedirs('avatars', exist_ok=True)
+
+@flask_app.route('/avatars/<filename>')
+def get_avatar(filename):
+    return send_from_directory('avatars', filename)
+
+@flask_app.route('/upload_avatar', methods=['POST'])
+def upload_avatar():
+    data = request.json
+    user_id = data.get('user_id')
+    image_data = data.get('image_data')
+    
+    if not image_data:
+        return jsonify({'ok': False, 'error': 'Нет фото'})
+    
+    if ',' in image_data:
+        image_data = image_data.split(',')[1]
+    
+    filename = f"avatar_{user_id}_{uuid.uuid4().hex[:8]}.jpg"
+    filepath = os.path.join('avatars', filename)
+    
+    with open(filepath, 'wb') as f:
+        f.write(base64.b64decode(image_data))
+    
+    avatar_url = f"/avatars/{filename}"
+    
+    # Сохраняем в базу
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    now = get_current_time()
+    cursor.execute('''
+        INSERT OR REPLACE INTO user_profiles (user_id, name, phone, avatar_url, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+    ''', (user_id, userProfile.get('name'), userProfile.get('phone'), avatar_url, now))
+    conn.commit()
+    conn.close()
+    
+    return jsonify({'ok': True, 'avatar_url': avatar_url})
+
+@flask_app.route('/get_profile', methods=['POST'])
+def get_profile():
+    data = request.json
+    user_id = data.get('user_id')
+    profile = get_user_profile(user_id)
+    if profile:
+        return jsonify({'ok': True, 'profile': profile})
+    return jsonify({'ok': True, 'profile': None})
+
+@flask_app.route('/save_profile', methods=['POST'])
+def save_profile():
+    data = request.json
+    user_id = data.get('user_id')
+    name = data.get('name')
+    phone = data.get('phone')
+    save_user_profile(user_id, name, phone)
+    return jsonify({'ok': True})
+
 @flask_app.route('/webapp_order_file', methods=['POST'])
 def webapp_order_file():
     name = request.form.get('name')
@@ -402,9 +480,8 @@ def webapp_orders():
     result = []
     for order in orders:
         created_at = order[10]
-        # Если дата неправильная, показываем текущее время
-        if not created_at or created_at == '' or created_at.startswith('1970') or created_at == 'None':
-            created_at = get_current_time()
+        if not created_at or created_at == '':
+            created_at = 'Дата не указана'
         result.append({
             'id': order[0],
             'model_name': order[5],
@@ -432,8 +509,8 @@ def admin_orders():
     result = []
     for order in orders:
         created_at = order[10]
-        if not created_at or created_at == '' or created_at.startswith('1970') or created_at == 'None':
-            created_at = get_current_time()
+        if not created_at or created_at == '':
+            created_at = 'Дата не указана'
         result.append({
             'id': order[0],
             'client_name': order[2],
@@ -523,7 +600,7 @@ def run_bot(dp):
 
 if __name__ == '__main__':
     init_db()
-    fix_dates_in_database()  # ← ИСПРАВЛЯЕМ ДАТЫ ПРИ ЗАПУСКЕ
+    fix_dates_in_database()
     print("🤖 Запуск клиентского бота...")
     print("🤖 Запуск админских команд...")
     print("🌐 Запуск веб-сервера...")
