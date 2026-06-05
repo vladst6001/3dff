@@ -452,6 +452,11 @@ def save_profile():
     return jsonify({'ok': True})
 
 
+@flask_app.route('/order_files/<filename>')
+def get_order_file(filename):
+    return send_from_directory('order_files', filename)
+
+
 @flask_app.route('/webapp_order_file', methods=['POST'])
 def webapp_order_file():
     name     = request.form.get('name')
@@ -461,13 +466,26 @@ def webapp_order_file():
     user_id  = request.form.get('user_id')
     username = request.form.get('username', 'нет')
 
-    order_id   = create_order(
+    # ── Сохраняем файл если есть ──
+    file_url = None
+    uploaded = request.files.get('file')
+    if uploaded and uploaded.filename:
+        os.makedirs('order_files', exist_ok=True)
+        ext      = os.path.splitext(uploaded.filename)[1].lower() or '.bin'
+        filename = f"order_{user_id}_{uuid.uuid4().hex[:8]}{ext}"
+        filepath = os.path.join('order_files', filename)
+        uploaded.save(filepath)
+        file_url = f"/order_files/{filename}"
+        print(f"📎 Файл сохранён: {filepath}")
+
+    order_id = create_order(
         client_id=user_id,
         client_name=name,
         client_username=username,
         phone=phone,
         model_name=model,
-        quantity=quantity
+        quantity=quantity,
+        image_url=file_url
     )
     # created_at берётся из БД — фиксированное время создания
     order = get_order(order_id)
@@ -477,10 +495,11 @@ def webapp_order_file():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         async def _send():
+            file_note = f"\n📎 Файл: да" if file_url else ""
             await client_bot.send_message(
                 ADMIN_CHAT_ID,
                 f"🆕 *НОВЫЙ ЗАКАЗ \\#{order_id} из Mini App\\!*\n\n"
-                f"👤 {name}\n📱 {phone}\n📦 {model}\n🔢 {quantity} шт\\.",
+                f"👤 {name}\n📱 {phone}\n📦 {model}\n🔢 {quantity} шт\\.{file_note}",
                 parse_mode="MarkdownV2"
             )
         loop.run_until_complete(_send())
@@ -533,6 +552,7 @@ def admin_orders():
             'phone':       order[4],
             'model_name':  order[5],
             'quantity':    order[6],
+            'image_url':   order[7] or None,
             'price_per_unit': order[8],
             'total_price': order[9],
             'status':      order[11],
