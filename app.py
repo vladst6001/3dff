@@ -798,7 +798,7 @@ async def cb_admin_users(callback_query: types.CallbackQuery):
     text = f"👥 ПОЛЬЗОВАТЕЛИ ({len(profiles)})\n\n"
     for p in profiles[:30]:
         uid, name, phone, avatar, updated = p
-        has_ava = "📸" if avatar else "👤"
+        has_ava = "📸" if avatar and avatar != "None" and avatar.strip() else "👤"
         text += f"{has_ava} {name}\n📱 {phone}\n🆔 {uid}\n📅 {updated or '—'}\n\n"
     await callback_query.message.answer(text)
 
@@ -814,7 +814,7 @@ async def admin_users_cmd(message: types.Message):
     text = f"👥 ПОЛЬЗОВАТЕЛИ ({len(profiles)})\n\n"
     for p in profiles[:30]:
         uid, name, phone, avatar, updated = p
-        has_ava = "📸" if avatar else "👤"
+        has_ava = "📸" if avatar and avatar != "None" and avatar.strip() else "👤"
         text += f"{has_ava} {name}\n📱 {phone}\n🆔 {uid}\n📅 {updated or '—'}\n\n"
     await message.answer(text)
 
