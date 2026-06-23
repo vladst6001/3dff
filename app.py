@@ -160,6 +160,15 @@ def get_user_profile(user_id):
     return None
 
 
+def get_all_profiles():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute('SELECT user_id, name, phone, avatar_url, updated_at FROM user_profiles ORDER BY updated_at DESC')
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+
 # ========== УТИЛИТЫ ==========
 STATUS_EMOJI = {
     'новый': '🟡', 'принят': '🟢', 'отказ': '🔴',
@@ -180,12 +189,14 @@ STATUS_MSG = {
 }
 
 
-def safe_send(chat_id, text):
+def safe_send(chat_id, text, bot=None):
+    if bot is None:
+        bot = client_bot
     try:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         async def _send():
-            await client_bot.send_message(chat_id, text)
+            await bot.send_message(chat_id, text)
         loop.run_until_complete(_send())
         loop.close()
     except Exception as e:
@@ -207,6 +218,11 @@ class OrderForm(StatesGroup):
     waiting_for_quantity = State()
 
 
+class RegForm(StatesGroup):
+    waiting_for_name  = State()
+    waiting_for_phone = State()
+
+
 client_keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
 client_keyboard.add(KeyboardButton("🛒 Сделать заказ"))
 client_keyboard.add(KeyboardButton("📋 Мои заказы"))
@@ -224,19 +240,86 @@ def main_menu_kb():
 
 @client_dp.message_handler(commands=['start'])
 async def client_start(message: types.Message):
+    profile = get_user_profile(message.from_user.id)
+    if profile and profile['name']:
+        await message.answer(
+            f"Привет, {profile['name']}!\n\n"
+            "Выберите действие:",
+            reply_markup=main_menu_kb()
+        )
+    else:
+        await message.answer(
+            "Добро пожаловать!\n\n"
+            "Для начала нужно зарегистрироваться.\n"
+            "Введите ваше имя:"
+        )
+        await RegForm.waiting_for_name.set()
+
+
+@client_dp.message_handler(state=RegForm.waiting_for_name)
+async def reg_get_name(message: types.Message, state: FSMContext):
+    async with state.proxy() as data:
+        data['name'] = message.text.strip()
+    await RegForm.next()
+    await message.answer("Введите ваш номер телефона:\nПример: +375291234567")
+
+
+@client_dp.message_handler(state=RegForm.waiting_for_phone)
+async def reg_get_phone(message: types.Message, state: FSMContext):
+    async with state.proxy() as data:
+        data['phone'] = message.text.strip()
+    profile = get_user_profile(message.from_user.id)
+    avatar = profile['avatar_url'] if profile else None
+    save_user_profile(message.from_user.id, data['name'], data['phone'], avatar)
+    await state.finish()
     await message.answer(
-        "🖨️ 3Dprinti\n\n"
-        "Сервис 3D-печати на заказ.\n"
-        "Выберите действие:",
+        f"✅ Регистрация завершена!\n\n"
+        f"👤 {data['name']}\n"
+        f"📱 {data['phone']}\n\n"
+        "Теперь вы можете оформлять заказы.",
         reply_markup=main_menu_kb()
     )
+
+
+@client_dp.message_handler(commands=['register'])
+async def cmd_register(message: types.Message):
+    profile = get_user_profile(message.from_user.id)
+    if profile and profile['name']:
+        await message.answer(
+            f"Вы уже зарегистрированы:\n\n"
+            f"👤 {profile['name']}\n"
+            f"📱 {profile['phone']}\n\n"
+            "Хотите изменить данные? Введите новое имя:"
+        )
+    else:
+        await message.answer("Введите ваше имя:")
+    await RegForm.waiting_for_name.set()
+
+
+@client_dp.message_handler(commands=['profile'])
+async def cmd_profile(message: types.Message):
+    profile = get_user_profile(message.from_user.id)
+    if not profile or not profile['name']:
+        await message.answer("Вы ещё не зарегистрированы.\nВведите /register")
+        return
+    text = (
+        f"👤 Ваш профиль\n\n"
+        f"Имя: {profile['name']}\n"
+        f"Телефон: {profile['phone']}\n"
+    )
+    if profile['avatar_url']:
+        text += f"Аватар: есть\n"
+    text += "\nДля изменения: /register"
+    await message.answer(text)
 
 
 @client_dp.message_handler(commands=['help'])
 async def cmd_help(message: types.Message):
     await message.answer(
-        "❓ Команды бота:\n\n"
+        "Команды бота:\n\n"
         "/start — Главное меню\n"
+        "/register — Регистрация / изменение данных\n"
+        "/profile — Мой профиль\n"
         "/new_order — Создать заказ\n"
         "/my_orders — Мои заказы\n"
         "/order_123 — Детали заказа\n"
@@ -248,8 +331,15 @@ async def cmd_help(message: types.Message):
 @client_dp.callback_query_handler(lambda c: c.data == "new_order")
 async def cb_new_order(callback_query: types.CallbackQuery):
     await callback_query.answer()
-    await OrderForm.waiting_for_name.set()
-    await callback_query.message.answer("Введите ваше имя:")
+    profile = get_user_profile(callback_query.from_user.id)
+    if not profile or not profile['name']:
+        await callback_query.message.answer("Сначала зарегистрируйтесь: /register")
+        return
+    await OrderForm.waiting_for_model.set()
+    await callback_query.message.answer(
+        f"Вы: {profile['name']} ({profile['phone']})\n\n"
+        "Введите название модели или описание:"
+    )
 
 
 @client_dp.callback_query_handler(lambda c: c.data == "my_orders")
@@ -275,7 +365,8 @@ async def cb_my_orders(callback_query: types.CallbackQuery):
 async def cb_help(callback_query: types.CallbackQuery):
     await callback_query.answer()
     await callback_query.message.answer(
-        "❓ Команды:\n\n"
+        "Команды:\n\n"
+        "/register — Регистрация\n"
         "/new_order — Создать заказ\n"
         "/my_orders — Мои заказы\n"
         "/order_123 — Детали заказа\n"
@@ -285,24 +376,15 @@ async def cb_help(callback_query: types.CallbackQuery):
 
 @client_dp.message_handler(commands=['new_order'])
 async def cmd_new_order(message: types.Message):
-    await OrderForm.waiting_for_name.set()
-    await message.answer("Введите ваше имя:")
-
-
-@client_dp.message_handler(state=OrderForm.waiting_for_name)
-async def get_name(message: types.Message, state: FSMContext):
-    async with state.proxy() as data:
-        data['name'] = message.text
-    await OrderForm.next()
-    await message.answer("Введите ваш номер телефона:\nПример: +375291234567")
-
-
-@client_dp.message_handler(state=OrderForm.waiting_for_phone)
-async def get_phone(message: types.Message, state: FSMContext):
-    async with state.proxy() as data:
-        data['phone'] = message.text.strip()
-    await OrderForm.next()
-    await message.answer("Введите название модели или описание:")
+    profile = get_user_profile(message.from_user.id)
+    if not profile or not profile['name']:
+        await message.answer("Сначала зарегистрируйтесь: /register")
+        return
+    await OrderForm.waiting_for_model.set()
+    await message.answer(
+        f"Вы: {profile['name']} ({profile['phone']})\n\n"
+        "Введите название модели или описание:"
+    )
 
 
 @client_dp.message_handler(state=OrderForm.waiting_for_model)
@@ -321,11 +403,14 @@ async def get_quantity(message: types.Message, state: FSMContext):
             await message.answer("Количество должно быть больше 0")
             return
         data = await state.get_data()
+        profile = get_user_profile(message.from_user.id)
+        name = profile['name'] if profile else "Клиент"
+        phone = profile['phone'] if profile else ""
         order_id = create_order(
             client_id=message.from_user.id,
-            client_name=data['name'],
+            client_name=name,
             client_username=message.from_user.username or "нет",
-            phone=data['phone'],
+            phone=phone,
             model_name=data['model'],
             quantity=quantity
         )
@@ -338,8 +423,8 @@ async def get_quantity(message: types.Message, state: FSMContext):
         safe_send(
             ADMIN_CHAT_ID,
             f"🆕 НОВЫЙ ЗАКАЗ #{order_id}\n\n"
-            f"👤 {data['name']}\n"
-            f"📱 {data['phone']}\n"
+            f"👤 {name}\n"
+            f"📱 {phone}\n"
             f"📦 {data['model']}\n"
             f"🔢 {quantity} шт."
         )
@@ -415,8 +500,15 @@ async def cmd_cancel_order(message: types.Message):
 
 @client_dp.message_handler(lambda m: m.text == "🛒 Сделать заказ")
 async def make_order(message: types.Message):
-    await OrderForm.waiting_for_name.set()
-    await message.answer("Введите ваше имя:")
+    profile = get_user_profile(message.from_user.id)
+    if not profile or not profile['name']:
+        await message.answer("Сначала зарегистрируйтесь: /register")
+        return
+    await OrderForm.waiting_for_model.set()
+    await message.answer(
+        f"Вы: {profile['name']} ({profile['phone']})\n\n"
+        "Введите название модели или описание:"
+    )
 
 
 @client_dp.message_handler(lambda m: m.text == "📋 Мои заказы")
@@ -437,7 +529,7 @@ async def my_orders_btn(message: types.Message):
     await message.answer(text)
 
 
-# ========== АДМИНСКИЕ КОМАНДЫ ==========
+# ========== АДМИНСКИЕ КОМАНДЫ (через клиентский бот) ==========
 @client_dp.message_handler(commands=['admin_orders'])
 async def admin_all_orders(message: types.Message):
     if message.from_user.id != ADMIN_CHAT_ID:
@@ -542,6 +634,268 @@ async def admin_price_order(message: types.Message):
 
 @client_dp.message_handler(lambda m: re.match(r'/status_\d+\s+.+', m.text or ''))
 async def admin_status_order(message: types.Message):
+    if message.from_user.id != ADMIN_CHAT_ID:
+        return
+    match = re.match(r'/status_(\d+)\s+(.+)', message.text)
+    if not match:
+        await message.answer("Формат: /status_123 подготовка модели")
+        return
+    order_id  = int(match.group(1))
+    new_status = match.group(2).strip()
+    update_order_status(order_id, new_status)
+    order = get_order(order_id)
+    if order:
+        msg = STATUS_MSG.get(new_status, f"🔄 Статус заказа №{order_id}: {new_status}")
+        msg = msg.format(id=order_id)
+        safe_send(order[1], msg)
+    await message.answer(f"✅ Заказ #{order_id} → {new_status}")
+
+
+# ========== АДМИНСКИЙ БОТ (отдельный) ==========
+admin_bot  = Bot(token=ADMIN_BOT_TOKEN)
+admin_dp   = Dispatcher(admin_bot, storage=MemoryStorage())
+admin_dp.middleware.setup(LoggingMiddleware())
+
+
+def admin_main_kb():
+    kb = InlineKeyboardMarkup(row_width=2)
+    kb.add(
+        InlineKeyboardButton("🆕 Новые", callback_data="adm_new"),
+        InlineKeyboardButton("⚡ Активные", callback_data="adm_active"),
+    )
+    kb.add(
+        InlineKeyboardButton("📋 Все заказы", callback_data="adm_all"),
+        InlineKeyboardButton("👥 Пользователи", callback_data="adm_users"),
+    )
+    return kb
+
+
+@admin_dp.message_handler(commands=['start'])
+async def admin_start(message: types.Message):
+    if message.from_user.id != ADMIN_CHAT_ID:
+        await message.answer("Нет доступа.")
+        return
+    await message.answer(
+        "🛠 Админ-панель 3Dprinti\n\n"
+        "Выберите действие:",
+        reply_markup=admin_main_kb()
+    )
+
+
+@admin_dp.message_handler(commands=['help'])
+async def admin_help_cmd(message: types.Message):
+    if message.from_user.id != ADMIN_CHAT_ID:
+        return
+    await message.answer(
+        "Команды админа:\n\n"
+        "/start — Меню\n"
+        "/orders — Все заказы\n"
+        "/new — Новые заказы\n"
+        "/active — Активные\n"
+        "/users — Пользователи\n"
+        "/accept_123 — Принять заказ\n"
+        "/reject_123 — Отказать\n"
+        "/price_123 500 — Установить цену\n"
+        "/status_123 печать — Изменить статус"
+    )
+
+
+@admin_dp.callback_query_handler(lambda c: c.data == "adm_new")
+async def cb_admin_new(callback_query: types.CallbackQuery):
+    if callback_query.from_user.id != ADMIN_CHAT_ID:
+        await callback_query.answer("Нет доступа", show_alert=True)
+        return
+    await callback_query.answer()
+    orders = get_all_orders(status="новый")
+    if not orders:
+        await callback_query.message.answer("🟡 Новых заказов нет")
+        return
+    for order in orders:
+        text = (
+            f"🆕 ЗАКАЗ #{order[0]}\n\n"
+            f"👤 {order[2]}\n📱 {order[4]}\n"
+            f"📦 {order[5]}\n🔢 {order[6]} шт.\n\n"
+            f"➡️ /accept_{order[0]} — принять\n"
+            f"➡️ /reject_{order[0]} — отказать"
+        )
+        await callback_query.message.answer(text)
+
+
+@admin_dp.callback_query_handler(lambda c: c.data == "adm_active")
+async def cb_admin_active(callback_query: types.CallbackQuery):
+    if callback_query.from_user.id != ADMIN_CHAT_ID:
+        await callback_query.answer("Нет доступа", show_alert=True)
+        return
+    await callback_query.answer()
+    active_statuses = ["принят", "цена выставлена", "подготовка модели", "оплачено наличными", "печать"]
+    orders = []
+    for s in active_statuses:
+        orders.extend(get_all_orders(status=s))
+    orders = sorted(orders, key=lambda x: x[0], reverse=True)
+    if not orders:
+        await callback_query.message.answer("⚡ Активных заказов нет")
+        return
+    text = "⚡ АКТИВНЫЕ ЗАКАЗЫ\n\n"
+    for order in orders[:20]:
+        emoji = STATUS_EMOJI.get(order[11], '⚪')
+        text += f"{emoji} #{order[0]} | {order[2]} | {order[11]} | {order[9]} руб.\n"
+    await callback_query.message.answer(text)
+
+
+@admin_dp.callback_query_handler(lambda c: c.data == "adm_all")
+async def cb_admin_all(callback_query: types.CallbackQuery):
+    if callback_query.from_user.id != ADMIN_CHAT_ID:
+        await callback_query.answer("Нет доступа", show_alert=True)
+        return
+    await callback_query.answer()
+    orders = get_all_orders()
+    if not orders:
+        await callback_query.message.answer("📭 Заказов нет")
+        return
+    text = "📋 ВСЕ ЗАКАЗЫ\n\n"
+    for order in orders[:20]:
+        text += f"#{order[0]} | {order[2]} | {order[5]} | {order[11]} | {order[9]} руб.\n"
+    await callback_query.message.answer(text)
+
+
+@admin_dp.callback_query_handler(lambda c: c.data == "adm_users")
+async def cb_admin_users(callback_query: types.CallbackQuery):
+    if callback_query.from_user.id != ADMIN_CHAT_ID:
+        await callback_query.answer("Нет доступа", show_alert=True)
+        return
+    await callback_query.answer()
+    profiles = get_all_profiles()
+    if not profiles:
+        await callback_query.message.answer("👥 Пользователей пока нет")
+        return
+    text = f"👥 ПОЛЬЗОВАТЕЛИ ({len(profiles)})\n\n"
+    for p in profiles[:30]:
+        uid, name, phone, avatar, updated = p
+        has_ava = "📸" if avatar else "👤"
+        text += f"{has_ava} {name}\n📱 {phone}\n🆔 {uid}\n📅 {updated or '—'}\n\n"
+    await callback_query.message.answer(text)
+
+
+@admin_dp.message_handler(commands=['users'])
+async def admin_users_cmd(message: types.Message):
+    if message.from_user.id != ADMIN_CHAT_ID:
+        return
+    profiles = get_all_profiles()
+    if not profiles:
+        await message.answer("👥 Пользователей пока нет")
+        return
+    text = f"👥 ПОЛЬЗОВАТЕЛИ ({len(profiles)})\n\n"
+    for p in profiles[:30]:
+        uid, name, phone, avatar, updated = p
+        has_ava = "📸" if avatar else "👤"
+        text += f"{has_ava} {name}\n📱 {phone}\n🆔 {uid}\n📅 {updated or '—'}\n\n"
+    await message.answer(text)
+
+
+@admin_dp.message_handler(commands=['orders'])
+async def admin_orders_cmd(message: types.Message):
+    if message.from_user.id != ADMIN_CHAT_ID:
+        return
+    orders = get_all_orders()
+    if not orders:
+        await message.answer("📭 Заказов нет")
+        return
+    text = "📋 ВСЕ ЗАКАЗЫ\n\n"
+    for order in orders[:20]:
+        text += f"#{order[0]} | {order[2]} | {order[5]} | {order[11]} | {order[9]} руб.\n"
+    await message.answer(text)
+
+
+@admin_dp.message_handler(commands=['new'])
+async def admin_new_cmd(message: types.Message):
+    if message.from_user.id != ADMIN_CHAT_ID:
+        return
+    orders = get_all_orders(status="новый")
+    if not orders:
+        await message.answer("🟡 Новых заказов нет")
+        return
+    for order in orders:
+        text = (
+            f"🆕 ЗАКАЗ #{order[0]}\n\n"
+            f"👤 {order[2]}\n📱 {order[4]}\n"
+            f"📦 {order[5]}\n🔢 {order[6]} шт.\n\n"
+            f"➡️ /accept_{order[0]} — принять\n"
+            f"➡️ /reject_{order[0]} — отказать"
+        )
+        await message.answer(text)
+
+
+@admin_dp.message_handler(commands=['active'])
+async def admin_active_cmd(message: types.Message):
+    if message.from_user.id != ADMIN_CHAT_ID:
+        return
+    active_statuses = ["принят", "цена выставлена", "подготовка модели", "оплачено наличными", "печать"]
+    orders = []
+    for s in active_statuses:
+        orders.extend(get_all_orders(status=s))
+    orders = sorted(orders, key=lambda x: x[0], reverse=True)
+    if not orders:
+        await message.answer("⚡ Активных заказов нет")
+        return
+    text = "⚡ АКТИВНЫЕ ЗАКАЗЫ\n\n"
+    for order in orders[:20]:
+        emoji = STATUS_EMOJI.get(order[11], '⚪')
+        text += f"{emoji} #{order[0]} | {order[2]} | {order[11]} | {order[9]} руб.\n"
+    await message.answer(text)
+
+
+@admin_dp.message_handler(lambda m: re.match(r'/accept_\d+', m.text or ''))
+async def admin_bot_accept(message: types.Message):
+    if message.from_user.id != ADMIN_CHAT_ID:
+        return
+    match = re.match(r'/accept_(\d+)', message.text)
+    order_id = int(match.group(1))
+    update_order_status(order_id, "принят")
+    order = get_order(order_id)
+    if order:
+        safe_send(order[1], f"🟢 Заказ №{order_id} принят в работу!")
+    await message.answer(f"✅ Заказ #{order_id} принят")
+
+
+@admin_dp.message_handler(lambda m: re.match(r'/reject_\d+', m.text or ''))
+async def admin_bot_reject(message: types.Message):
+    if message.from_user.id != ADMIN_CHAT_ID:
+        return
+    match = re.match(r'/reject_(\d+)', message.text)
+    order_id = int(match.group(1))
+    update_order_status(order_id, "отказ")
+    order = get_order(order_id)
+    if order:
+        safe_send(order[1], f"🔴 Заказ №{order_id} отклонён")
+    await message.answer(f"❌ Заказ #{order_id} отклонён")
+
+
+@admin_dp.message_handler(lambda m: re.match(r'/price_\d+\s+\d+', m.text or ''))
+async def admin_bot_price(message: types.Message):
+    if message.from_user.id != ADMIN_CHAT_ID:
+        return
+    match = re.match(r'/price_(\d+)\s+(\d+(?:\.\d+)?)', message.text)
+    if not match:
+        await message.answer("Формат: /price_123 500")
+        return
+    order_id = int(match.group(1))
+    price = float(match.group(2))
+    set_order_price(order_id, price)
+    order = get_order(order_id)
+    if order:
+        total = price * order[6]
+        safe_send(
+            order[1],
+            f"💰 Стоимость заказа №{order_id}\n\n"
+            f"📦 {order[5]}\n🔢 {order[6]} шт.\n"
+            f"💵 Цена за шт.: {price} руб.\n"
+            f"💲 Итого: {total} руб."
+        )
+    await message.answer(f"✅ Цена {price} руб. для заказа #{order_id}")
+
+
+@admin_dp.message_handler(lambda m: re.match(r'/status_\d+\s+.+', m.text or ''))
+async def admin_bot_status(message: types.Message):
     if message.from_user.id != ADMIN_CHAT_ID:
         return
     match = re.match(r'/status_(\d+)\s+(.+)', message.text)
@@ -794,5 +1148,8 @@ if __name__ == '__main__':
     print("🌐 Запуск веб-сервера...")
     web_thread = threading.Thread(target=run_web_server, daemon=True)
     web_thread.start()
-    print("🤖 Запуск бота...")
-    run_bot(client_dp)
+    print("🤖 Запуск клиентского бота...")
+    client_thread = threading.Thread(target=run_bot, args=(client_dp,), daemon=True)
+    client_thread.start()
+    print("🛠 Запуск админского бота...")
+    run_bot(admin_dp)
