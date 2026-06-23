@@ -961,11 +961,7 @@ def upload_avatar():
         return jsonify({'ok': False, 'error': 'Нет фото'})
     if ',' in img_data:
         img_data = img_data.split(',')[1]
-    filename = f"avatar_{user_id}_{uuid.uuid4().hex[:8]}.jpg"
-    filepath = os.path.join('avatars', filename)
-    with open(filepath, 'wb') as f:
-        f.write(base64.b64decode(img_data))
-    avatar_url = f"/avatars/{filename}"
+    avatar_url = f"data:image/jpeg;base64,{img_data}"
     conn   = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("SELECT name, phone FROM user_profiles WHERE user_id=?", (user_id,))
