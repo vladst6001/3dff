@@ -223,6 +223,19 @@ class RegForm(StatesGroup):
     waiting_for_phone = State()
 
 
+def validate_phone(phone):
+    digits = re.sub(r'[^\d]', '', phone)
+    if digits.startswith('375') and len(digits) >= 12:
+        return '+' + digits[:12]
+    if digits.startswith('7') and len(digits) >= 11:
+        return '+' + digits[:11]
+    if digits.startswith('8') and len(digits) >= 11:
+        return '+7' + digits[1:11]
+    if len(digits) >= 9:
+        return '+375' + digits[-9:]
+    return None
+
+
 client_keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
 client_keyboard.add(KeyboardButton("🛒 Сделать заказ"))
 client_keyboard.add(KeyboardButton("📋 Мои заказы"))
@@ -266,16 +279,28 @@ async def reg_get_name(message: types.Message, state: FSMContext):
 
 @client_dp.message_handler(state=RegForm.waiting_for_phone)
 async def reg_get_phone(message: types.Message, state: FSMContext):
+    raw = message.text.strip()
+    phone = validate_phone(raw)
+    if not phone:
+        await message.answer(
+            "❌ Неверный формат телефона!\n\n"
+            "Примеры правильных номеров:\n"
+            "+375291234567\n"
+            "+375 (29) 123-45-67\n"
+            "291234567\n\n"
+            "Введите номер ещё раз:"
+        )
+        return
     async with state.proxy() as data:
-        data['phone'] = message.text.strip()
+        data['phone'] = phone
     profile = get_user_profile(message.from_user.id)
     avatar = profile['avatar_url'] if profile else None
-    save_user_profile(message.from_user.id, data['name'], data['phone'], avatar)
+    save_user_profile(message.from_user.id, data['name'], phone, avatar)
     await state.finish()
     await message.answer(
         f"✅ Регистрация завершена!\n\n"
         f"👤 {data['name']}\n"
-        f"📱 {data['phone']}\n\n"
+        f"📱 {phone}\n\n"
         "Теперь вы можете оформлять заказы.",
         reply_markup=main_menu_kb()
     )
@@ -1069,6 +1094,21 @@ def admin_orders():
             'updated_at':  order[13] or ''
         })
     return jsonify({'orders': result})
+
+
+@flask_app.route('/admin_users', methods=['GET'])
+def admin_users():
+    profiles = get_all_profiles()
+    result = []
+    for p in profiles:
+        result.append({
+            'user_id':   p[0],
+            'name':      p[1],
+            'phone':     p[2],
+            'avatar_url': p[3],
+            'updated_at': p[4]
+        })
+    return jsonify({'users': result})
 
 
 @flask_app.route('/admin_accept', methods=['POST'])
