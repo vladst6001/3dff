@@ -1113,6 +1113,24 @@ def admin_users():
     return jsonify({'users': result})
 
 
+@flask_app.route('/admin_user_orders/<int:user_id>', methods=['GET'])
+def admin_user_orders(user_id):
+    orders = get_orders_by_client(user_id)
+    result = []
+    for order in orders:
+        result.append({
+            'id':          order[0],
+            'model_name':  order[5],
+            'quantity':    order[6],
+            'price_per_unit': order[8],
+            'total_price': order[9],
+            'status':      order[11],
+            'created_at':  order[12] or '—',
+            'updated_at':  order[13] or ''
+        })
+    return jsonify({'orders': result})
+
+
 @flask_app.route('/admin_accept', methods=['POST'])
 def admin_accept():
     data     = request.json
