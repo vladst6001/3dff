@@ -226,14 +226,14 @@ class RegForm(StatesGroup):
 
 def validate_phone(phone):
     digits = re.sub(r'[^\d]', '', phone)
-    if digits.startswith('375') and len(digits) >= 12:
-        return '+' + digits[:12]
-    if digits.startswith('7') and len(digits) >= 11:
-        return '+' + digits[:11]
-    if digits.startswith('8') and len(digits) >= 11:
-        return '+7' + digits[1:11]
-    if len(digits) >= 9:
-        return '+375' + digits[-9:]
+    if digits.startswith('375'):
+        digits = digits[3:]
+    elif digits.startswith('7'):
+        digits = digits[1:]
+    elif digits.startswith('8'):
+        digits = digits[1:]
+    if len(digits) == 9:
+        return f"+375 {digits[:2]} {digits[2:5]}-{digits[5:7]}-{digits[7:9]}"
     return None
 
 
@@ -284,11 +284,12 @@ async def reg_get_phone(message: types.Message, state: FSMContext):
     phone = validate_phone(raw)
     if not phone:
         await message.answer(
-            "❌ Неверный формат телефона!\n\n"
-            "Примеры правильных номеров:\n"
+            "❌ Неверный номер телефона!\n\n"
+            "Нужно 9 цифр — номер в Беларуси.\n\n"
+            "Примеры:\n"
+            "291234567\n"
             "+375291234567\n"
-            "+375 (29) 123-45-67\n"
-            "291234567\n\n"
+            "375 29 123-45-67\n\n"
             "Введите номер ещё раз:"
         )
         return
