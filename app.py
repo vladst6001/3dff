@@ -62,15 +62,13 @@ def init_db():
 
 
 def get_current_time():
-    """Возвращает текущее время в Минске (UTC+3) — ФИКСИРОВАННОЕ, не меняется."""
     return datetime.now(MINSK_TZ).strftime('%Y-%m-%d %H:%M:%S')
 
 
 def create_order(client_id, client_name, client_username, phone, model_name, quantity, image_url=None):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    now = get_current_time()   # ← сохраняется один раз при создании
-    print(f"📝 Создание заказа: клиент={client_id}, время={now}")
+    now = get_current_time()
     cursor.execute('''
         INSERT INTO orders
             (client_id, client_name, client_username, phone, model_name, quantity, image_url, created_at, updated_at)
@@ -79,7 +77,6 @@ def create_order(client_id, client_name, client_username, phone, model_name, qua
     order_id = cursor.lastrowid
     conn.commit()
     conn.close()
-    print(f"✅ Заказ {order_id} создан, дата={now}")
     return order_id
 
 
@@ -106,7 +103,6 @@ def update_order_status(order_id, status):
                    (status, get_current_time(), order_id))
     conn.commit()
     conn.close()
-    print(f"✅ Заказ {order_id} → статус '{status}'")
 
 
 def get_order(order_id):
@@ -150,7 +146,6 @@ def save_user_profile(user_id, name, phone, avatar_url=None):
     ''', (user_id, name, phone, avatar_url, now))
     conn.commit()
     conn.close()
-    print(f"✅ Профиль пользователя {user_id} сохранён")
 
 
 def get_user_profile(user_id):
@@ -162,6 +157,33 @@ def get_user_profile(user_id):
     if row:
         return {'name': row[0], 'phone': row[1], 'avatar_url': row[2]}
     return None
+
+
+# ========== УТИЛИТЫ ==========
+STATUS_EMOJI = {
+    'новый': '🟡', 'принят': '🟢', 'отказ': '🔴',
+    'подготовка модели': '🟠', 'цена выставлена': '💰',
+    'оплачено наличными': '✅', 'печать': '🖨️', 'готова': '🎉',
+    'завершён': '🏁'
+}
+
+STATUS_MSG = {
+    'принят': '🟢 Ваш заказ №{id} принят в работу!',
+    'отказ': '🔴 Ваш заказ №{id} отклонён.',
+    'подготовка модели': '🟠 Ваш заказ №{id} — подготовка модели.',
+    'цена выставлена': '💰 Цена за заказ №{id} выставлена.',
+    'оплачено наличными': '✅ Заказ №{id} оплачен.',
+    'печать': '🖨️ Ваш заказ №{id} начали печатать!',
+    'готова': '🎉 Ваш заказ №{id} готов к выдаче!',
+    'завершён': '🏁 Заказ №{id} завершён.'
+}
+
+
+def escape_md(text):
+    text = str(text)
+    for ch in ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']:
+        text = text.replace(ch, '\\' + ch)
+    return text
 
 
 # ========== КЛИЕНТСКИЙ БОТ ==========
@@ -183,19 +205,82 @@ client_keyboard.add(KeyboardButton("🛒 Сделать заказ"))
 client_keyboard.add(KeyboardButton("📋 Мои заказы"))
 
 
+def main_menu_kb():
+    kb = InlineKeyboardMarkup(row_width=2)
+    kb.add(
+        InlineKeyboardButton("📦 Новый заказ", callback_data="new_order"),
+        InlineKeyboardButton("📋 Мои заказы", callback_data="my_orders"),
+    )
+    kb.add(InlineKeyboardButton("❓ Помощь", callback_data="help"))
+    return kb
+
+
 @client_dp.message_handler(commands=['start'])
 async def client_start(message: types.Message):
     await message.answer(
         "🖨️ *3Dprinti*\n\n"
-        "Сервис 3D\\-печати на заказ\\.\n"
-        "Нажмите «🛒 Сделать заказ», чтобы оформить заказ\\.",
-        reply_markup=client_keyboard,
+        "Сервис 3D печати на заказ\\.\n"
+        "Выберите действие:",
+        reply_markup=main_menu_kb(),
         parse_mode="MarkdownV2"
     )
 
 
-@client_dp.message_handler(lambda m: m.text == "🛒 Сделать заказ")
-async def make_order(message: types.Message):
+@client_dp.message_handler(commands=['help'])
+async def cmd_help(message: types.Message):
+    await message.answer(
+        "❓ *Команды бота*\n\n"
+        "/start \\- Главное меню\n"
+        "/new\\_order \\- Создать заказ\n"
+        "/my\\_orders \\- Мои заказы\n"
+        "/order\\_123 \\- Детали заказа\n"
+        "/cancel\\_123 \\- Отменить заказ\n"
+        "/help \\- Эта справка",
+        parse_mode="MarkdownV2"
+    )
+
+
+@client_dp.callback_query_handler(lambda c: c.data == "new_order")
+async def cb_new_order(callback_query: types.CallbackQuery):
+    await callback_query.answer()
+    await OrderForm.waiting_for_name.set()
+    await callback_query.message.answer("Введите ваше имя:")
+
+
+@client_dp.callback_query_handler(lambda c: c.data == "my_orders")
+async def cb_my_orders(callback_query: types.CallbackQuery):
+    await callback_query.answer()
+    orders = get_orders_by_client(callback_query.from_user.id)
+    if not orders:
+        await callback_query.message.answer("📭 У вас пока нет заказов.")
+        return
+    text = "📋 *МОИ ЗАКАЗЫ*\n\n"
+    for order in orders[:10]:
+        emoji = STATUS_EMOJI.get(order[11], '⚪')
+        total = order[9] if order[9] else 0
+        text += f"{emoji} *#{order[0]}* {escape_md(order[5])}\n"
+        text += f"   {order[6]} шт\\."
+        if total > 0:
+            text += f" \\| {total} руб\\."
+        text += f" \\| {escape_md(order[11])}\n"
+    await callback_query.message.answer(text, parse_mode="MarkdownV2")
+
+
+@client_dp.callback_query_handler(lambda c: c.data == "help")
+async def cb_help(callback_query: types.CallbackQuery):
+    await callback_query.answer()
+    await callback_query.message.answer(
+        "❓ *Команды бота*\n\n"
+        "/new\\_order \\- Создать заказ\n"
+        "/my\\_orders \\- Мои заказы\n"
+        "/order\\_123 \\- Детали заказа\n"
+        "/cancel\\_123 \\- Отменить заказ",
+        parse_mode="MarkdownV2"
+    )
+
+
+@client_dp.message_handler(commands=['new_order'])
+async def cmd_new_order(message: types.Message):
     await OrderForm.waiting_for_name.set()
     await message.answer("Введите ваше имя:")
 
@@ -241,24 +326,96 @@ async def get_quantity(message: types.Message, state: FSMContext):
             quantity=quantity
         )
         await message.answer(
-            f"✅ *Заказ №{order_id} создан\\!*\n\n"
-            f"📦 Модель: {data['model']}\n"
-            f"🔢 Количество: {quantity} шт\\.\n\n"
-            "Статус можно отслеживать в «📋 Мои заказы»\\.",
-            parse_mode="MarkdownV2"
+            f"✅ Заказ №{order_id} создан!\n\n"
+            f"📦 {data['model']}\n"
+            f"🔢 {quantity} шт.\n\n"
+            "Статус в «📋 Мои заказы».",
         )
         await client_bot.send_message(
             ADMIN_CHAT_ID,
-            f"🆕 *НОВЫЙ ЗАКАЗ \\#{order_id}*\n\n"
+            f"🆕 НОВЫЙ ЗАКАЗ #{order_id}\n\n"
             f"👤 {data['name']}\n"
             f"📱 {data['phone']}\n"
             f"📦 {data['model']}\n"
-            f"🔢 {quantity} шт\\.",
-            parse_mode="MarkdownV2"
+            f"🔢 {quantity} шт."
         )
         await state.finish()
     except ValueError:
         await message.answer("❌ Ошибка! Введите число.")
+
+
+@client_dp.message_handler(commands=['my_orders'])
+async def cmd_my_orders(message: types.Message):
+    orders = get_orders_by_client(message.from_user.id)
+    if not orders:
+        await message.answer("📭 У вас пока нет заказов.")
+        return
+    text = "📋 *МОИ ЗАКАЗЫ*\n\n"
+    for order in orders[:10]:
+        emoji = STATUS_EMOJI.get(order[11], '⚪')
+        total = order[9] if order[9] else 0
+        text += f"{emoji} *#{order[0]}* {escape_md(order[5])}\n"
+        text += f"   {order[6]} шт\\."
+        if total > 0:
+            text += f" \\| {total} руб\\."
+        text += f" \\| {escape_md(order[11])}\n"
+    await message.answer(text, parse_mode="MarkdownV2")
+
+
+@client_dp.message_handler(lambda m: re.match(r'/order_(\d+)', m.text or ''))
+async def cmd_order_detail(message: types.Message):
+    match = re.match(r'/order_(\d+)', message.text)
+    order_id = int(match.group(1))
+    order = get_order(order_id)
+    if not order:
+        await message.answer("❌ Заказ не найден.")
+        return
+    if order[1] != message.from_user.id:
+        await message.answer("❌ Это не ваш заказ.")
+        return
+    emoji = STATUS_EMOJI.get(order[11], '⚪')
+    total = order[9] if order[9] else 0
+    price = order[8] if order[8] else 0
+    text = (
+        f"{emoji} *Заказ #{order[0]}*\n\n"
+        f"📦 {escape_md(order[5])}\n"
+        f"🔢 {order[6]} шт\\.\n"
+    )
+    if price > 0:
+        text += f"💵 {price} руб\\. / шт\\.\n"
+    if total > 0:
+        text += f"💰 *Итого: {total} руб\\.*\n"
+    text += f"📍 {escape_md(order[11])}\n"
+    text += f"📅 {escape_md(order[12] or '—')}"
+    await message.answer(text, parse_mode="MarkdownV2")
+
+
+@client_dp.message_handler(lambda m: re.match(r'/cancel_(\d+)', m.text or ''))
+async def cmd_cancel_order(message: types.Message):
+    match = re.match(r'/cancel_(\d+)', message.text)
+    order_id = int(match.group(1))
+    order = get_order(order_id)
+    if not order:
+        await message.answer("❌ Заказ не найден.")
+        return
+    if order[1] != message.from_user.id:
+        await message.answer("❌ Это не ваш заказ.")
+        return
+    if order[11] != 'новый':
+        await message.answer("❌ Отменить можно только заказ со статусом «новый».")
+        return
+    update_order_status(order_id, "отказ")
+    await message.answer(f"❌ Заказ №{order_id} отменён.")
+    await client_bot.send_message(
+        ADMIN_CHAT_ID,
+        f"❌ Клиент отменил заказ #{order_id}"
+    )
+
+
+@client_dp.message_handler(lambda m: m.text == "🛒 Сделать заказ")
+async def make_order(message: types.Message):
+    await OrderForm.waiting_for_name.set()
+    await message.answer("Введите ваше имя:")
 
 
 @client_dp.message_handler(lambda m: m.text == "📋 Мои заказы")
@@ -267,26 +424,19 @@ async def my_orders(message: types.Message):
     if not orders:
         await message.answer("📭 У вас пока нет заказов.")
         return
-    status_emoji = {
-        'новый': '🟡', 'принят': '🟢', 'отказ': '🔴',
-        'подготовка модели': '🟠', 'цена выставлена': '💰',
-        'оплачено наличными': '✅', 'печать': '🖨️', 'готова': '🎉',
-        'завершён': '🏁'
-    }
     text = "📋 *МОИ ЗАКАЗЫ*\n\n"
-    for order in orders:
-        emoji = status_emoji.get(order[11], '⚪')
+    for order in orders[:10]:
+        emoji = STATUS_EMOJI.get(order[11], '⚪')
         total = order[9] if order[9] else 0
-        text += f"{emoji} *Заказ №{order[0]}*\n"
-        text += f" 📦 {order[5]}\n"
-        text += f" 🔢 {order[6]} шт\\.\n"
+        text += f"{emoji} *#{order[0]}* {escape_md(order[5])}\n"
+        text += f"   {order[6]} шт\\."
         if total > 0:
-            text += f" 💰 {total} руб\\.\n"
-        text += f" 📍 {order[11]}\n\n"
+            text += f" \\| {total} руб\\."
+        text += f" \\| {escape_md(order[11])}\n"
     await message.answer(text, parse_mode="MarkdownV2")
 
 
-# ========== АДМИНСКИЕ КОМАНДЫ (через клиентский бот) ==========
+# ========== АДМИНСКИЕ КОМАНДЫ ==========
 @client_dp.message_handler(commands=['admin_orders'])
 async def admin_all_orders(message: types.Message):
     if message.from_user.id != ADMIN_CHAT_ID:
@@ -297,7 +447,7 @@ async def admin_all_orders(message: types.Message):
         return
     text = "📋 *ВСЕ ЗАКАЗЫ*\n\n"
     for order in orders[:20]:
-        text += f"\\#{order[0]} \\| {order[2]} \\| {order[5]} \\| {order[11]} \\| {order[9]} руб\\.\n"
+        text += f"#{order[0]} \\| {escape_md(order[2])} \\| {escape_md(order[5])} \\| {escape_md(order[11])} \\| {order[9]} руб\\.\n"
     await message.answer(text, parse_mode="MarkdownV2")
 
 
@@ -311,13 +461,32 @@ async def admin_new_orders(message: types.Message):
         return
     for order in orders:
         text = (
-            f"🆕 *ЗАКАЗ \\#{order[0]}*\n\n"
-            f"👤 {order[2]}\n📱 {order[4]}\n"
-            f"📦 {order[5]}\n🔢 {order[6]} шт\\.\n\n"
-            f"➡️ /accept\\_{order[0]} — принять\n"
-            f"➡️ /reject\\_{order[0]} — отказать"
+            f"🆕 *ЗАКАЗ #{order[0]}*\n\n"
+            f"👤 {escape_md(order[2])}\n📱 {escape_md(order[4])}\n"
+            f"📦 {escape_md(order[5])}\n🔢 {order[6]} шт\\.\n\n"
+            f"➡️ /accept_{order[0]} — принять\n"
+            f"➡️ /reject_{order[0]} — отказать"
         )
         await message.answer(text, parse_mode="MarkdownV2")
+
+
+@client_dp.message_handler(commands=['active'])
+async def admin_active_orders(message: types.Message):
+    if message.from_user.id != ADMIN_CHAT_ID:
+        return
+    active_statuses = ["принят", "цена выставлена", "подготовка модели", "оплачено наличными", "печать"]
+    orders = []
+    for s in active_statuses:
+        orders.extend(get_all_orders(status=s))
+    orders = sorted(orders, key=lambda x: x[0], reverse=True)
+    if not orders:
+        await message.answer("⚡ Активных заказов нет")
+        return
+    text = "⚡ *АКТИВНЫЕ ЗАКАЗЫ*\n\n"
+    for order in orders[:20]:
+        emoji = STATUS_EMOJI.get(order[11], '⚪')
+        text += f"{emoji} #{order[0]} \\| {escape_md(order[2])} \\| {escape_md(order[11])} \\| {order[9]} руб\\.\n"
+    await message.answer(text, parse_mode="MarkdownV2")
 
 
 @client_dp.message_handler(lambda m: re.match(r'/accept_\d+', m.text or ''))
@@ -329,8 +498,8 @@ async def admin_accept_order(message: types.Message):
     update_order_status(order_id, "принят")
     order = get_order(order_id)
     if order:
-        await client_bot.send_message(order[1], f"🟢 *Заказ №{order_id} принят в работу\\!*", parse_mode="MarkdownV2")
-    await message.answer(f"✅ Заказ \\#{order_id} принят", parse_mode="MarkdownV2")
+        await client_bot.send_message(order[1], f"🟢 Заказ №{order_id} принят в работу!")
+    await message.answer(f"✅ Заказ #{order_id} принят")
 
 
 @client_dp.message_handler(lambda m: re.match(r'/reject_\d+', m.text or ''))
@@ -342,8 +511,8 @@ async def admin_reject_order(message: types.Message):
     update_order_status(order_id, "отказ")
     order = get_order(order_id)
     if order:
-        await client_bot.send_message(order[1], f"🔴 *Заказ №{order_id} отклонён*", parse_mode="MarkdownV2")
-    await message.answer(f"❌ Заказ \\#{order_id} отклонён", parse_mode="MarkdownV2")
+        await client_bot.send_message(order[1], f"🔴 Заказ №{order_id} отклонён")
+    await message.answer(f"❌ Заказ #{order_id} отклонён")
 
 
 @client_dp.message_handler(lambda m: re.match(r'/price_\d+\s+\d+', m.text or ''))
@@ -352,7 +521,7 @@ async def admin_price_order(message: types.Message):
         return
     match = re.match(r'/price_(\d+)\s+(\d+(?:\.\d+)?)', message.text)
     if not match:
-        await message.answer("Формат: /price\\_123 500", parse_mode="MarkdownV2")
+        await message.answer("Формат: /price_123 500")
         return
     order_id = int(match.group(1))
     price = float(match.group(2))
@@ -362,13 +531,12 @@ async def admin_price_order(message: types.Message):
         total = price * order[6]
         await client_bot.send_message(
             order[1],
-            f"💰 *Стоимость заказа №{order_id}*\n\n"
-            f"📦 {order[5]}\n🔢 {order[6]} шт\\.\n"
-            f"💵 Цена за шт\\.: {price} руб\\.\n"
-            f"💲 *Итого: {total} руб\\.*",
-            parse_mode="MarkdownV2"
+            f"💰 Стоимость заказа №{order_id}\n\n"
+            f"📦 {order[5]}\n🔢 {order[6]} шт.\n"
+            f"💵 Цена за шт.: {price} руб.\n"
+            f"💲 Итого: {total} руб."
         )
-    await message.answer(f"✅ Цена {price} руб\\. для заказа \\#{order_id}", parse_mode="MarkdownV2")
+    await message.answer(f"✅ Цена {price} руб. для заказа #{order_id}")
 
 
 @client_dp.message_handler(lambda m: re.match(r'/status_\d+\s+.+', m.text or ''))
@@ -377,19 +545,17 @@ async def admin_status_order(message: types.Message):
         return
     match = re.match(r'/status_(\d+)\s+(.+)', message.text)
     if not match:
-        await message.answer("Формат: /status\\_123 подготовка модели", parse_mode="MarkdownV2")
+        await message.answer("Формат: /status_123 подготовка модели")
         return
     order_id  = int(match.group(1))
     new_status = match.group(2).strip()
     update_order_status(order_id, new_status)
     order = get_order(order_id)
     if order:
-        await client_bot.send_message(
-            order[1],
-            f"🔄 *Статус заказа №{order_id}:* {new_status}",
-            parse_mode="MarkdownV2"
-        )
-    await message.answer(f"✅ Заказ \\#{order_id} → {new_status}", parse_mode="MarkdownV2")
+        msg = STATUS_MSG.get(new_status, f"🔄 Статус заказа №{order_id}: {new_status}")
+        msg = msg.format(id=order_id)
+        await client_bot.send_message(order[1], msg)
+    await message.answer(f"✅ Заказ #{order_id} → {new_status}")
 
 
 # ========== FLASK ==========
@@ -418,7 +584,6 @@ def upload_avatar():
     with open(filepath, 'wb') as f:
         f.write(base64.b64decode(img_data))
     avatar_url = f"/avatars/{filename}"
-    # обновляем только avatar_url, сохраняем name/phone
     conn   = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("SELECT name, phone FROM user_profiles WHERE user_id=?", (user_id,))
@@ -466,7 +631,6 @@ def webapp_order_file():
     user_id  = request.form.get('user_id')
     username = request.form.get('username', 'нет')
 
-    # ── Сохраняем файл если есть ──
     file_url = None
     uploaded = request.files.get('file')
     if uploaded and uploaded.filename:
@@ -476,7 +640,6 @@ def webapp_order_file():
         filepath = os.path.join('order_files', filename)
         uploaded.save(filepath)
         file_url = f"/order_files/{filename}"
-        print(f"📎 Файл сохранён: {filepath}")
 
     order_id = create_order(
         client_id=user_id,
@@ -487,7 +650,6 @@ def webapp_order_file():
         quantity=quantity,
         image_url=file_url
     )
-    # created_at берётся из БД — фиксированное время создания
     order = get_order(order_id)
     created_at = order[12] if order else get_current_time()
 
@@ -498,9 +660,8 @@ def webapp_order_file():
             file_note = f"\n📎 Файл: да" if file_url else ""
             await client_bot.send_message(
                 ADMIN_CHAT_ID,
-                f"🆕 *НОВЫЙ ЗАКАЗ \\#{order_id} из Mini App\\!*\n\n"
-                f"👤 {name}\n📱 {phone}\n📦 {model}\n🔢 {quantity} шт\\.{file_note}",
-                parse_mode="MarkdownV2"
+                f"🆕 НОВЫЙ ЗАКАЗ #{order_id} из Mini App!\n\n"
+                f"👤 {name}\n📱 {phone}\n📦 {model}\n🔢 {quantity} шт.{file_note}"
             )
         loop.run_until_complete(_send())
         loop.close()
@@ -523,7 +684,7 @@ def webapp_orders():
             'quantity':    order[6],
             'total_price': order[9],
             'status':      order[11],
-            'created_at':  created_at   # ← всегда фиксированная дата
+            'created_at':  created_at
         })
     return jsonify({'orders': result})
 
@@ -573,7 +734,7 @@ def admin_accept():
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             async def _s():
-                await client_bot.send_message(order[1], f"🟢 *Заказ №{order_id} принят в работу\\!*", parse_mode="MarkdownV2")
+                await client_bot.send_message(order[1], "🟢 Заказ №{} принят в работу!".format(order_id))
             loop.run_until_complete(_s())
             loop.close()
         threading.Thread(target=_notify, daemon=True).start()
@@ -591,7 +752,7 @@ def admin_reject():
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             async def _s():
-                await client_bot.send_message(order[1], f"🔴 *Заказ №{order_id} отклонён*", parse_mode="MarkdownV2")
+                await client_bot.send_message(order[1], "🔴 Заказ №{} отклонён".format(order_id))
             loop.run_until_complete(_s())
             loop.close()
         threading.Thread(target=_notify, daemon=True).start()
@@ -613,11 +774,9 @@ def admin_price():
             async def _s():
                 await client_bot.send_message(
                     order[1],
-                    f"💰 *Стоимость заказа №{order_id}*\n\n"
-                    f"📦 {order[5]}\n🔢 {order[6]} шт\\.\n"
-                    f"💵 Цена за шт\\.: {price} руб\\.\n"
-                    f"💲 *Итого: {total} руб\\.*",
-                    parse_mode="MarkdownV2"
+                    "💰 Стоимость заказа №{}\n\n📦 {}\n🔢 {} шт.\n💵 Цена за шт.: {} руб.\n💲 Итого: {} руб.".format(
+                        order_id, order[5], order[6], price, total
+                    )
                 )
             loop.run_until_complete(_s())
             loop.close()
@@ -637,11 +796,9 @@ def admin_status():
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             async def _s():
-                await client_bot.send_message(
-                    order[1],
-                    f"🔄 *Статус заказа №{order_id}:* {new_status}",
-                    parse_mode="MarkdownV2"
-                )
+                msg = STATUS_MSG.get(new_status, "🔄 Статус заказа №{}: {}".format(order_id, new_status))
+                msg = msg.format(id=order_id)
+                await client_bot.send_message(order[1], msg)
             loop.run_until_complete(_s())
             loop.close()
         threading.Thread(target=_notify, daemon=True).start()
