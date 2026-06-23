@@ -141,10 +141,17 @@ def save_user_profile(user_id, name, phone, avatar_url=None):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     now = get_current_time()
-    cursor.execute('''
-        INSERT OR REPLACE INTO user_profiles (user_id, name, phone, avatar_url, updated_at)
-        VALUES (?, ?, ?, ?, ?)
-    ''', (user_id, name, phone, avatar_url, now))
+    if avatar_url is not None:
+        cursor.execute('''
+            INSERT OR REPLACE INTO user_profiles (user_id, name, phone, avatar_url, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (user_id, name, phone, avatar_url, now))
+    else:
+        cursor.execute('''
+            INSERT INTO user_profiles (user_id, name, phone, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET name=?, phone=?, updated_at=?
+        ''', (user_id, name, phone, now, name, phone, now))
     conn.commit()
     conn.close()
 
@@ -991,7 +998,8 @@ def save_profile():
     user_id = data.get('user_id')
     name    = data.get('name')
     phone   = data.get('phone')
-    save_user_profile(user_id, name, phone)
+    avatar  = data.get('avatar_url')
+    save_user_profile(user_id, name, phone, avatar)
     return jsonify({'ok': True})
 
 
