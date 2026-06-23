@@ -189,16 +189,17 @@ STATUS_MSG = {
 }
 
 
-def safe_send(chat_id, text, bot=None):
-    if bot is None:
-        bot = client_bot
+def safe_send(chat_id, text, bot_token=None):
+    if bot_token is None:
+        bot_token = CLIENT_BOT_TOKEN
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        async def _send():
-            await bot.send_message(chat_id, text)
-        loop.run_until_complete(_send())
-        loop.close()
+        async def _do():
+            b = Bot(token=bot_token)
+            try:
+                await b.send_message(chat_id, text)
+            finally:
+                await b.session.close()
+        asyncio.run(_do())
     except Exception as e:
         print(f"❌ Ошибка отправки в {chat_id}: {e}")
         traceback.print_exc()
@@ -1192,4 +1193,12 @@ if __name__ == '__main__':
     client_thread = threading.Thread(target=run_bot, args=(client_dp,), daemon=True)
     client_thread.start()
     print("🛠 Запуск админского бота...")
-    run_bot(admin_dp)
+    admin_thread = threading.Thread(target=run_bot, args=(admin_dp,), daemon=True)
+    admin_thread.start()
+    print("✅ Все сервисы запущены!")
+    # Главный поток остаётся живым
+    try:
+        while True:
+            threading.Event().wait(timeout=60)
+    except KeyboardInterrupt:
+        print("⛔ Остановка...")
