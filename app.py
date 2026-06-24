@@ -1083,11 +1083,12 @@ def webapp_order_file():
     order = get_order(order_id)
     created_at = order[12] if order else get_current_time()
 
+    source = request.form.get('source', 'Mini App')
     file_note = "\n📎 Файл: да" if file_url else ""
     safe_send(
         ADMIN_CHAT_ID,
-        f"🆕 НОВЫЙ ЗАКАЗ #{order_id} из Mini App!\n\n"
-        f"👤 {name}\n📱 {phone}\n📦 {model}\n🔢 {quantity} шт.{file_note}"
+        f"🆕 НОВЫЙ ЗАКАЗ #{order_id}\n\n"
+        f"👤 {name}\n📱 {phone}\n📦 {model}\n🔢 {quantity} шт.{file_note}\n📱 Источник: {source}"
     )
 
     return jsonify({'ok': True, 'order_id': order_id, 'created_at': created_at})
