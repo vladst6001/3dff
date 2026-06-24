@@ -261,6 +261,10 @@ def main_menu_kb():
         InlineKeyboardButton("📦 Новый заказ", callback_data="new_order"),
         InlineKeyboardButton("📋 Мои заказы", callback_data="my_orders"),
     )
+    kb.add(
+        InlineKeyboardButton("📱 Приложение", callback_data="app"),
+        InlineKeyboardButton("📖 Инструкция", callback_data="instruction"),
+    )
     kb.add(InlineKeyboardButton("❓ Помощь", callback_data="help"))
     return kb
 
@@ -364,7 +368,51 @@ async def cmd_help(message: types.Message):
         "/my_orders — Мои заказы\n"
         "/order_123 — Детали заказа\n"
         "/cancel_123 — Отменить заказ\n"
+        "/instruction — Инструкция по приложению\n"
         "/help — Эта справка"
+    )
+
+
+@client_dp.message_handler(commands=['instruction'])
+async def cmd_instruction(message: types.Message):
+    instr_text = (
+        "📖 ИНСТРУКЦИЯ 3Dprinti\n\n"
+        "📱 Мобильное приложение:\n"
+        "1. Скачай APK файл\n"
+        "2. Установи на телефон\n"
+        "3. Зарегистрируйся (имя + телефон)\n"
+        "4. Оформляй заказы!\n\n"
+        "🔧 Админ-панель:\n"
+        "Настройки → О приложении → 7 раз на версию → пароль: 458307pP\n\n"
+        "🔔 Уведомления:\n"
+        "Настройки → Push-уведомления → Разрешить\n\n"
+        "📋 Команды бота:\n"
+        "/new_order — Создать заказ\n"
+        "/my_orders — Мои заказы\n"
+        "/order_123 — Детали заказа\n"
+        "/cancel_123 — Отменить заказ\n"
+        "/help — Справка\n\n"
+        "🌐 Сайт: vladst6001.github.io"
+    )
+    await message.answer(instr_text)
+
+
+@client_dp.message_handler(commands=['app'])
+async def cmd_app(message: types.Message):
+    await message.answer(
+        "📱 Мобильное приложение 3Dprinti\n\n"
+        "Скачай и установи APK файл:\n"
+        "👉 vladst6001.github.io\n\n"
+        "Установка:\n"
+        "1. Скачай файл\n"
+        "2. Открой на телефоне\n"
+        "3. Разреши установку\n"
+        "4. Наслаждайся!\n\n"
+        "В приложении ты можешь:\n"
+        "📦 Оформлять заказы\n"
+        "📋 Отслеживать статус\n"
+        "🔔 Получать уведомления\n"
+        "👤 Управлять профилем"
     )
 
 
@@ -410,7 +458,48 @@ async def cb_help(callback_query: types.CallbackQuery):
         "/new_order — Создать заказ\n"
         "/my_orders — Мои заказы\n"
         "/order_123 — Детали заказа\n"
-        "/cancel_123 — Отменить заказ"
+        "/cancel_123 — Отменить заказ\n"
+        "/instruction — Инструкция\n"
+        "/app — Скачать приложение"
+    )
+
+
+@client_dp.callback_query_handler(lambda c: c.data == "instruction")
+async def cb_instruction(callback_query: types.CallbackQuery):
+    await callback_query.answer()
+    instr_text = (
+        "📖 ИНСТРУКЦИЯ 3Dprinti\n\n"
+        "📱 Мобильное приложение:\n"
+        "1. Скачай APK файл\n"
+        "2. Установи на телефон\n"
+        "3. Зарегистрируйся (имя + телефон)\n"
+        "4. Оформляй заказы!\n\n"
+        "🔧 Админ-панель:\n"
+        "Настройки → О приложении → 7 раз на версию → пароль: 458307pP\n\n"
+        "🔔 Уведомления:\n"
+        "Настройки → Push-уведомления → Разрешить\n\n"
+        "🌐 Сайт: vladst6001.github.io"
+    )
+    await callback_query.message.answer(instr_text)
+
+
+@client_dp.callback_query_handler(lambda c: c.data == "app")
+async def cb_app(callback_query: types.CallbackQuery):
+    await callback_query.answer()
+    await callback_query.message.answer(
+        "📱 Мобильное приложение 3Dprinti\n\n"
+        "Скачай и установи APK файл:\n"
+        "👉 vladst6001.github.io\n\n"
+        "Установка:\n"
+        "1. Скачай файл\n"
+        "2. Открой на телефоне\n"
+        "3. Разреши установку\n"
+        "4. Наслаждайся!\n\n"
+        "В приложении ты можешь:\n"
+        "📦 Оформлять заказы\n"
+        "📋 Отслеживать статус\n"
+        "🔔 Получать уведомления\n"
+        "👤 Управлять профилем"
     )
 
 
@@ -733,6 +822,7 @@ async def admin_help_cmd(message: types.Message):
         "/new — Новые заказы\n"
         "/active — Активные\n"
         "/users — Пользователи\n"
+        "/instruction — Инструкция\n"
         "/accept_123 — Принять заказ\n"
         "/reject_123 — Отказать\n"
         "/price_123 500 — Установить цену\n"
