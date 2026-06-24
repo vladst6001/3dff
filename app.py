@@ -17,6 +17,9 @@ from aiogram.utils.executor import start_polling
 import threading
 import traceback
 
+# Pending admin confirmations
+admin_requests = {}  # request_id -> {user_id, user_name, status: 'pending'}
+
 # ========== КОНФИГУРАЦИЯ ==========
 CLIENT_BOT_TOKEN = os.environ.get('CLIENT_BOT_TOKEN')
 ADMIN_BOT_TOKEN  = os.environ.get('ADMIN_BOT_TOKEN')
@@ -947,6 +950,44 @@ async def admin_bot_status(message: types.Message):
     await message.answer(f"✅ Заказ #{order_id} → {new_status}")
 
 
+@admin_dp.callback_query_handler(lambda c: c.data.startswith('admin_confirm_'))
+async def cb_admin_confirm(callback_query: types.CallbackQuery):
+    if callback_query.from_user.id != ADMIN_CHAT_ID:
+        await callback_query.answer("Нет доступа", show_alert=True)
+        return
+    req_id = callback_query.data.replace('admin_confirm_', '')
+    req = admin_requests.get(req_id)
+    if not req:
+        await callback_query.answer("Запрос не найден", show_alert=True)
+        return
+    req['status'] = 'confirmed'
+    await callback_query.answer("✅ Доступ подтверждён")
+    await callback_query.message.edit_text(
+        f"✅ Доступ подтверждён\n\n"
+        f"👤 {req['user_name']}\n🆔 {req['user_id']}"
+    )
+    safe_send(req['user_id'], "✅ Доступ администратора подтверждён! Перезайди в настройки разработчика.")
+
+
+@admin_dp.callback_query_handler(lambda c: c.data.startswith('admin_deny_'))
+async def cb_admin_deny(callback_query: types.CallbackQuery):
+    if callback_query.from_user.id != ADMIN_CHAT_ID:
+        await callback_query.answer("Нет доступа", show_alert=True)
+        return
+    req_id = callback_query.data.replace('admin_deny_', '')
+    req = admin_requests.get(req_id)
+    if not req:
+        await callback_query.answer("Запрос не найден", show_alert=True)
+        return
+    req['status'] = 'denied'
+    await callback_query.answer("❌ Доступ отклонён")
+    await callback_query.message.edit_text(
+        f"❌ Доступ отклонён\n\n"
+        f"👤 {req['user_name']}\n🆔 {req['user_id']}"
+    )
+    safe_send(req['user_id'], "❌ Запрос на доступ администратора отклонён.")
+
+
 # ========== FLASK ==========
 flask_app = Flask(__name__)
 CORS(flask_app)
@@ -1193,6 +1234,46 @@ def admin_status():
 @flask_app.route('/')
 def health_check():
     return "3Dprinti бот работает! ✅"
+
+
+@flask_app.route('/request_admin', methods=['POST'])
+def request_admin():
+    data = request.json
+    user_id = data.get('user_id')
+    password = data.get('password', '')
+    user_name = data.get('name', 'Неизвестный')
+
+    if password != '45800307':
+        return jsonify({'ok': False, 'error': 'Неверный пароль'})
+
+    req_id = f"req_{user_id}_{int(datetime.now().timestamp())}"
+    admin_requests[req_id] = {'user_id': user_id, 'user_name': user_name, 'status': 'pending'}
+
+    kb = InlineKeyboardMarkup(row_width=2)
+    kb.add(
+        InlineKeyboardButton("✅ Подтвердить", callback_data=f"admin_confirm_{req_id}"),
+        InlineKeyboardButton("❌ Отказать", callback_data=f"admin_deny_{req_id}")
+    )
+
+    safe_send(
+        ADMIN_CHAT_ID,
+        f"🔑 Запрос на доступ админа\n\n"
+        f"👤 Пользователь: {user_name}\n"
+        f"🆔 ID: {user_id}\n\n"
+        f"Подтвердить доступ?",
+        reply_markup=kb
+    )
+    return jsonify({'ok': True, 'req_id': req_id})
+
+
+@flask_app.route('/check_admin_status', methods=['POST'])
+def check_admin_status():
+    data = request.json
+    req_id = data.get('req_id', '')
+    req = admin_requests.get(req_id)
+    if not req:
+        return jsonify({'ok': True, 'status': 'denied'})
+    return jsonify({'ok': True, 'status': req['status']})
 
 
 # ========== ЗАПУСК ==========
