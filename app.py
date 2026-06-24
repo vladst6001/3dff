@@ -1246,7 +1246,7 @@ def request_admin():
     password = data.get('password', '')
     user_name = data.get('name', 'Неизвестный')
 
-    if password != '45800307':
+    if password != '458307pP':
         return jsonify({'ok': False, 'error': 'Неверный пароль'})
 
     req_id = f"req_{user_id}_{int(datetime.now().timestamp())}"
