@@ -392,7 +392,7 @@ async def cmd_instruction(message: types.Message):
         "/order_123 — Детали заказа\n"
         "/cancel_123 — Отменить заказ\n"
         "/help — Справка\n\n"
-        "🌐 Сайт: vladst6001.github.io"
+        "🌐 Сайт: 3Dprinti Telegram бот"
     )
     await message.answer(instr_text)
 
@@ -402,7 +402,7 @@ async def cmd_app(message: types.Message):
     await message.answer(
         "📱 Мобильное приложение 3Dprinti\n\n"
         "Скачай и установи APK файл:\n"
-        "👉 vladst6001.github.io\n\n"
+        "👉 3Dprinti Telegram бот\n\n"
         "Установка:\n"
         "1. Скачай файл\n"
         "2. Открой на телефоне\n"
@@ -478,7 +478,7 @@ async def cb_instruction(callback_query: types.CallbackQuery):
         "Настройки → О приложении → 7 раз на версию → пароль: 458307pP\n\n"
         "🔔 Уведомления:\n"
         "Настройки → Push-уведомления → Разрешить\n\n"
-        "🌐 Сайт: vladst6001.github.io"
+        "🌐 Сайт: 3Dprinti Telegram бот"
     )
     await callback_query.message.answer(instr_text)
 
@@ -489,7 +489,7 @@ async def cb_app(callback_query: types.CallbackQuery):
     await callback_query.message.answer(
         "📱 Мобильное приложение 3Dprinti\n\n"
         "Скачай и установи APK файл:\n"
-        "👉 vladst6001.github.io\n\n"
+        "👉 3Dprinti Telegram бот\n\n"
         "Установка:\n"
         "1. Скачай файл\n"
         "2. Открой на телефоне\n"
