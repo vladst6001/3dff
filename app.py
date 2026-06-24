@@ -199,14 +199,17 @@ STATUS_MSG = {
 }
 
 
-def safe_send(chat_id, text, bot_token=None):
+def safe_send(chat_id, text, bot_token=None, reply_markup=None):
     if bot_token is None:
         bot_token = CLIENT_BOT_TOKEN
     try:
         async def _do():
             b = Bot(token=bot_token)
             try:
-                await b.send_message(chat_id, text)
+                kwargs = {'chat_id': chat_id, 'text': text}
+                if reply_markup:
+                    kwargs['reply_markup'] = reply_markup
+                await b.send_message(**kwargs)
             finally:
                 await b.session.close()
         asyncio.run(_do())
@@ -1261,6 +1264,7 @@ def request_admin():
         f"👤 Пользователь: {user_name}\n"
         f"🆔 ID: {user_id}\n\n"
         f"Подтвердить доступ?",
+        bot_token=ADMIN_BOT_TOKEN,
         reply_markup=kb
     )
     return jsonify({'ok': True, 'req_id': req_id})
