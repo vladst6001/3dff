@@ -535,7 +535,7 @@ async def cmd_cancel_order(message: types.Message):
         return
     update_order_status(order_id, "отказ")
     await message.answer(f"❌ Заказ №{order_id} отменён.")
-    safe_send(ADMIN_CHAT_ID, f"❌ Клиент отменил заказ #{order_id}")
+    safe_send(ADMIN_CHAT_ID, f"❌ Клиент отменил заказ #{order_id}", bot_token=ADMIN_BOT_TOKEN)
 
 
 @client_dp.message_handler(lambda m: m.text == "🛒 Сделать заказ")
@@ -1088,7 +1088,8 @@ def webapp_order_file():
     safe_send(
         ADMIN_CHAT_ID,
         f"🆕 НОВЫЙ ЗАКАЗ #{order_id}\n\n"
-        f"👤 {name}\n📱 {phone}\n📦 {model}\n🔢 {quantity} шт.{file_note}\n📱 Источник: {source}"
+        f"👤 {name}\n📱 {phone}\n📦 {model}\n🔢 {quantity} шт.{file_note}\n📱 Источник: {source}",
+        bot_token=ADMIN_BOT_TOKEN
     )
 
     return jsonify({'ok': True, 'order_id': order_id, 'created_at': created_at})
